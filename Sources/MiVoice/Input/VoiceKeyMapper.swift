@@ -3,6 +3,7 @@
 // (GPL-3.0-only). See NOTICE.
 import Foundation
 import IOKit.hid
+import MiVoiceCore
 
 struct HIDKeyMapping: Equatable {
     static let sourceKey = "HIDKeyboardModifierMappingSrc"
