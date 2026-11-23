@@ -23,6 +23,36 @@
 
 > 取舍：Apple 的离线中文识别通常不如豆包/微信输入法，标点和专有名词可能更差；换来的是零联网、零驱动、零音频路由故障。对“日常说一段话变成文字”足够，对“逐字听写”不一定。
 
+## 两种语音方式
+
+| 方式 | 需要什么 | 音频去哪 | 适合 |
+|---|---|---|---|
+| **Apple 离线识别**（默认） | 无额外驱动 | 只在本机内存，识别后由 MiVoice 粘贴 | 要求音频绝不出本机 |
+| **微信输入法（虚拟麦克风）** | BlackHole 2ch，或 SayAll 的 MiRemoteV 2ch | 写进虚拟麦克风，由微信输入法录音/识别 | 中文准确率优先，接受微信输入法的隐私政策 |
+
+MiVoice 不内置 HAL 音频驱动。驱动安装、CoreAudio 重启和版本冲突正是 SayAll 容易卡死的部分；这里复用已经装好的 BlackHole / MiRemoteV，应用本身仍然是一个无驱动的 `.app`。
+
+微信输入法 2.0+ 的语音输入是**按住 Fn 说话**。MiVoice 会在按住遥控器语音键时合成一个 Fn 按住事件，并把 16 kHz 音频写进虚拟麦克风；松开后等音频排空再释放 Fn。MiVoice 本身不联网，但**微信输入法会按它自己的隐私政策处理语音**，这是选它时必须接受的取舍。
+
+## 下载与安装（GitHub Release）
+
+1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.0.0.zip`。
+2. 解压，把 `MiVoice.app` 拖进“应用程序”或 `~/Applications`。
+3. 首次打开如果被 Gatekeeper 拦截：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/MiVoice.app
+open /Applications/MiVoice.app
+```
+
+4. 按下面的“首次启动”授权蓝牙、语音识别、辅助功能、输入监控。
+
+发布包是 ad-hoc 签名，没有 Apple 公证；如果你有 Developer ID，可以自己重新签名：
+
+```bash
+codesign --force --deep --sign "Developer ID Application: 你的名字 (TEAMID)" /Applications/MiVoice.app
+```
+
 ## 环境要求
 
 - Apple Silicon Mac（M1/M2/M3/M4），macOS 14 或更高
@@ -98,6 +128,45 @@ CODESIGN_IDENTITY="Apple Development: 你的名字 (TEAMID)" INSTALL=1 ./scripts
 
 如果“离线模型：无”，MiVoice 会直接报错，**不会**退回联网识别。
 
+## 用微信输入法识别（虚拟麦克风）
+
+### 1. 安装虚拟麦克风
+
+推荐 **BlackHole 2ch**（开源 HAL 插件，不需要内核扩展）：
+
+```bash
+brew install --cask blackhole-2ch
+```
+
+没有 Homebrew 的话，从 [BlackHole Releases](https://github.com/ExistentialAudio/BlackHole/releases) 下载 `BlackHole2ch.pkg` 安装。安装会重启 CoreAudio，期间声音会短暂中断。
+
+如果机器上还留着 SayAll 的 `MiRemoteV 2ch`，MiVoice 会直接识别它，不必再装 BlackHole。
+
+### 2. 在 MiVoice 里选择
+
+设置 → **语音方式**：
+
+- 识别方式：`微信输入法（虚拟麦克风）`
+- 虚拟麦克风：`BlackHole 2ch`（或 `MiRemoteV 2ch`）
+- 打开“语音时自动切换系统输入到虚拟麦克风”
+
+点“测试 Fn 触发”，此时微信输入法应该开始/结束一次录音。如果它没反应，先确认：
+
+- 微信输入法 2.0.0 或更高版本；
+- 微信输入法已在“系统设置 → 键盘 → 输入法”中启用，并且当前是活动输入法；
+- 焦点在一个可输入的文本框里；
+- MiVoice 有“辅助功能”权限（合成 Fn 需要）。
+
+### 3. 微信输入法的设置
+
+微信输入法 2.0+ 默认**按住 Fn 说话**，一般不需要改快捷键。如果它有自己的麦克风选项，选 `BlackHole 2ch`；如果没有，就依赖 MiVoice 的“自动切换系统输入”。也可以在“系统设置 → 声音 → 输入”里确认当前输入是 `BlackHole 2ch`。
+
+### 4. 使用
+
+把光标放进输入框 → 按住遥控器语音键说话 → 松开。MiVoice 把音频写进虚拟麦克风并按住 Fn，微信输入法负责识别和上屏；MiVoice 不再自己粘贴文字。
+
+> 隐私：这条链路里 MiVoice 不上传任何数据，但微信输入法会按它自己的隐私政策处理语音（通常需要联网）。如果要求音频绝不出本机，请用默认的 `Apple 离线识别`。
+
 ## 使用
 
 - **语音**：按住遥控器语音键，说一句话，松开。文字会粘贴到当前焦点所在的输入框。
@@ -116,7 +185,8 @@ CODESIGN_IDENTITY="Apple Development: 你的名字 (TEAMID)" INSTALL=1 ./scripts
 - `Package.swift` 没有外部依赖；
 - 没有 Sparkle、没有官网检查、没有账号、没有统计、没有云同步；
 - 音频只在进程内存中解码，不写临时文件、不写日志；
-- 识别使用 `SFSpeechRecognizer`，每个请求都设置 `requiresOnDeviceRecognition = true`；没有离线模型时请求失败，不会把音频发给服务器；
+- Apple 模式使用 `SFSpeechRecognizer`，每个请求都设置 `requiresOnDeviceRecognition = true`；没有离线模型时请求失败，不会把音频发给服务器；
+- 微信输入法模式只把音频写进本机虚拟声卡；音频之后由微信输入法处理，MiVoice 无法控制其上传行为；
 - 识别结果只粘贴到当前应用，不保存历史；
 - 剪贴板在粘贴后自动恢复（可在设置中关闭）；
 - 日志只有连接状态和错误，不记录语音、文字、遥控器地址或前台应用。
@@ -163,7 +233,7 @@ sudo lsof -i -p "$(pgrep MiVoice)"    # 应没有任何网络连接
 - 不支持长按连发；方向键需要重复按。
 - 单次语音上限 60 秒。
 - 不做实时逐字上屏，只在松开后一次性粘贴，因此松开到出字有约 1 秒延迟。
-- 不内置虚拟声卡，因此不能把遥控器音频喂给豆包/微信输入法；如果确实需要，可以后续加一个可选的 BlackHole 输出模式。
+- 不内置 HAL 驱动：微信输入法模式需要预先安装 BlackHole 2ch，或使用 SayAll 的 MiRemoteV 2ch。
 - 不提供自动更新；升级就是重新构建、替换 `.app`。
 
 ## 目录结构

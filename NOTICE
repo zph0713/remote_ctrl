@@ -17,6 +17,10 @@ Portions of this project are adapted from:
   Reference commit: 8a93f321ac71a602300c6cd77f7256fa4b63068e
   License: GPL-3.0-only
 
+  Mi Remote Helper
+  https://github.com/ericyangpan/mi-remote-helper
+  License: GPL-3.0-only
+
 Adapted parts:
 
   - ATVV service/characteristic UUIDs and capability command bytes
@@ -26,6 +30,9 @@ Adapted parts:
   - Xiaomi RC003 HID vendor/product matching (0x2717 / 0x32B8)
   - RC003 HID report usage parsing and keyboard-page usage map
   - Voice key usages (F5 / 0x3E and 0x0C)
+  - CoreAudio loopback device catalog and default-input switching
+  - AVAudioEngine 16 kHz PCM output to BlackHole / MiRemoteV
+  - WeChat Input Method hold-Fn triggering and virtual-microphone routing
 
 MiVoice is an independent, minimal implementation. It does not include the
 SayAll application, its virtual audio driver, its update framework, its
