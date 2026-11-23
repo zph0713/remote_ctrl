@@ -11,9 +11,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Swift version
         run: swift --version
+
       - name: Build app
-        run: swift build -c release --product MiVoice
+        run: |
+          set -o pipefail
+          swift build -c release --product MiVoice 2>&1 | tee build.log
+
+      - name: Publish build errors
+        if: failure()
+        run: |
+          if [ -f build.log ]; then
+            grep -E "error:" build.log | head -40 | while IFS= read -r line; do
+              echo "::error title=Swift build::${line}"
+            done
+          fi
+
       - name: Test core
+        if: success()
         run: swift test
+
       - name: Audit network APIs
+        if: success()
         run: ./scripts/audit.sh
