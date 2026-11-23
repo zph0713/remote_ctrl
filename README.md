@@ -36,7 +36,7 @@ MiVoice 不内置 HAL 音频驱动。驱动安装、CoreAudio 重启和版本冲
 
 ## 下载与安装（GitHub Release）
 
-1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.2.1.zip`。
+1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.2.2.zip`。
 2. 解压，把 `MiVoice.app` 拖进“应用程序”或 `~/Applications`。
 3. 首次打开如果被 Gatekeeper 拦截：
 
@@ -232,6 +232,7 @@ sudo lsof -i -p "$(pgrep MiVoice)"    # 应没有任何网络连接
 | 没有识别到语音 | 确认“离线模型：有”；靠近遥控器；按住键说完再松开 |
 | 微信输入法没反应 | 确认“Fn 映射：已映射 F5 → Fn”；点“重新应用 Fn 映射”；确认它是当前输入法、焦点在文本框，且 MiVoice 有输入监控/辅助功能权限 |
 | 设置里“遥控器麦克风”电平不跳 | 遥控器麦克风没开或 BLE 音频没通：重连遥控器；确认没有别的 App 占着遥控器 |
+| 设置里“电脑麦克风”电平不跳 | 授权麦克风；确认状态显示“监听中：内建麦克风”；如果仍不动，退出并重开 MiVoice |
 | 电平在跳但微信输入法没字 | 微信输入法没录到虚拟麦克风：把系统输入设为 `BlackHole 2ch`，**退出并重开微信输入法**；再检查微信输入法自己的麦克风设置 |
 | 微信输入法仍用内置麦 | 先把系统设置 → 声音 → 输入设为 `BlackHole 2ch`，再重启微信输入法；有些版本会缓存输入设备 |
 | 识别成功但没有文字 | 授权“辅助功能”；确认当前有文本输入焦点；密码框等安全输入框不支持粘贴 |

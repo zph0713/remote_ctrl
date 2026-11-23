@@ -51,7 +51,9 @@ final class MacMicMonitor {
             error = "无法选择内建麦克风（\(result)）"
             return false
         }
-        let format = engine.inputNode.inputFormat(forBus: 0)
+        // The tap format is the format the input node *produces*; using the
+        // input format here can yield a zero-channel or mismatched tap.
+        let format = engine.inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             error = "内建麦克风格式不可用"
             return false
@@ -75,6 +77,26 @@ final class MacMicMonitor {
         do {
             engine.prepare()
             try engine.start()
+            // AVAudioEngine can report running while the selected input device
+            // is still stopped; start it explicitly and confirm the binding.
+            var bound = AudioDeviceID(0)
+            var boundSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+            let boundOK = AudioUnitGetProperty(
+                unit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &bound,
+                &boundSize
+            ) == noErr && bound == device.id
+            guard boundOK else {
+                engine.inputNode.removeTap(onBus: 0)
+                tapInstalled = false
+                engine.stop()
+                error = "内建麦克风绑定失败"
+                return false
+            }
+            _ = AudioDeviceStart(device.id, nil)
             self.engine = engine
             deviceName = device.name
             error = nil

@@ -44,6 +44,11 @@ final class AppModel: NSObject, ObservableObject {
     private var warnedAccessibility = false
     private var started = false
     private var applyingVoiceConfig = false
+    private var isSuspended = false
+    private var sessionLocked = false
+    private var screensAsleep = false
+    private var systemAsleep = false
+    private var wantMacMicMonitor = false
 
     override init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
@@ -97,10 +102,41 @@ final class AppModel: NSObject, ObservableObject {
             name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
-        NSWorkspace.shared.notificationCenter.addObserver(
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
             self,
-            selector: #selector(systemDidWake),
+            selector: #selector(workspaceWillSleep(_:)),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        workspace.addObserver(
+            self,
+            selector: #selector(workspaceDidWake(_:)),
             name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        workspace.addObserver(
+            self,
+            selector: #selector(screensDidSleep(_:)),
+            name: NSWorkspace.screensDidSleepNotification,
+            object: nil
+        )
+        workspace.addObserver(
+            self,
+            selector: #selector(screensDidWake(_:)),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+        workspace.addObserver(
+            self,
+            selector: #selector(sessionDidResignActive(_:)),
+            name: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil
+        )
+        workspace.addObserver(
+            self,
+            selector: #selector(sessionDidBecomeActive(_:)),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
     }
@@ -116,6 +152,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func applicationDidBecomeActive() {
+        guard !isSuspended else { return }
         refreshPermissions()
         refreshDiagnostics()
         refreshAudioDevices()
@@ -125,13 +162,105 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
-    @objc private func systemDidWake() {
-        refreshAudioDevices()
-        configureVirtualMic()
+    @objc private func workspaceWillSleep(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.systemAsleep = true
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func workspaceDidWake(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.systemAsleep = false
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func screensDidSleep(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.screensAsleep = true
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func screensDidWake(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.screensAsleep = false
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func sessionDidResignActive(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.sessionLocked = true
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func sessionDidBecomeActive(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.sessionLocked = false
+            self?.updateSuspension()
+        }
+    }
+
+    private func onMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
+    }
+
+    private func updateSuspension() {
+        let shouldSuspend = sessionLocked || screensAsleep || systemAsleep
+        if shouldSuspend {
+            suspendForSleep()
+        } else {
+            resumeAfterSleep()
+        }
+    }
+
+    /// Release every wake-capable resource before the Mac sleeps or locks:
+    /// audio engines, BLE, HID, Fn remapping and the system input override.
+    private func suspendForSleep() {
+        guard !isSuspended else { return }
+        isSuspended = true
+        voiceSessionActive = false
+        isRecording = false
+        activeVoiceMode = .appleSpeech
+        hud.hide()
+        speech.cancel()
+        virtualMic.stop()
+        link.stop()
         buttons.stop()
-        applyVoiceModeConfiguration()
-        if case .ready = linkState { return }
-        link.reconnectNow()
+        voiceKeyMapper.restore()
+        inputLock.unlock()
+        macMicMonitor.stop()
+        macMicLevel = 0
+        macMicStatus = "已暂停（屏幕锁定/休眠）"
+        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+        onStatusChange?()
+    }
+
+    /// Restart only after the session is active and the display is awake. The
+    /// short delay keeps unlock/login responsive instead of doing BLE, audio
+    /// and HID work in the same run loop turn as the wake notification.
+    private func resumeAfterSleep() {
+        guard isSuspended else { return }
+        isSuspended = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, !self.isSuspended else { return }
+            self.refreshPermissions()
+            self.refreshAudioDevices()
+            self.configureVirtualMic()
+            self.link.start()
+            self.applyVoiceModeConfiguration()
+            if self.wantMacMicMonitor {
+                self.startMacMicMonitor()
+            }
+            self.onStatusChange?()
+        }
     }
 
     // MARK: - Settings
@@ -342,6 +471,11 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func startMacMicMonitor() {
+        wantMacMicMonitor = true
+        guard !isSuspended else {
+            macMicStatus = "已暂停（屏幕锁定/休眠）"
+            return
+        }
         if macMicMonitor.isRunning {
             macMicStatus = "监听中：\(macMicMonitor.deviceName)"
             return
@@ -394,6 +528,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stopMacMicMonitor() {
+        wantMacMicMonitor = false
         macMicMonitor.stop()
         macMicLevel = 0
         macMicStatus = "已停止"

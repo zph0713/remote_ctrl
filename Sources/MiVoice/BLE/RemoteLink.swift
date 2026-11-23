@@ -104,6 +104,8 @@ final class RemoteLink: NSObject {
         cancelTimers()
         tearDownConnection()
         central?.stopScan()
+        central?.delegate = nil
+        central = nil
         state = .idle
     }
 
