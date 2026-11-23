@@ -283,6 +283,13 @@ struct SettingsView: View {
                 actionTitle: "请求",
                 action: { model.requestInputMonitoring() }
             )
+            permissionRow(
+                title: "麦克风",
+                granted: model.macMicStatus.hasPrefix("监听中"),
+                detail: "读取内建麦克风，仅用于电平对比；不参与识别",
+                actionTitle: "请求",
+                action: { model.requestMacMicAccess() }
+            )
             HStack {
                 Spacer()
                 Button("退出并重新打开") { model.restartApplication() }

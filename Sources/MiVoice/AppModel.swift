@@ -372,6 +372,27 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    func requestMacMicAccess() {
+        switch macMicMonitor.authorizationStatus {
+        case .authorized:
+            startMacMicMonitor()
+        case .notDetermined:
+            macMicMonitor.requestAccess { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.startMacMicMonitor()
+                    } else {
+                        self.macMicStatus = "未授权麦克风"
+                    }
+                }
+            }
+        default:
+            macMicStatus = "未授权麦克风（系统设置 → 隐私与安全性 → 麦克风）"
+            Permissions.open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+    }
+
     func stopMacMicMonitor() {
         macMicMonitor.stop()
         macMicLevel = 0
@@ -522,6 +543,7 @@ final class AppModel: NSObject, ObservableObject {
             defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
         }
         sessionPeak = 0
+        hud.hide()
         virtualMic.beginSession()
         onStatusChange?()
     }
