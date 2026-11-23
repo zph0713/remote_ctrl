@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>MiVoice</string>
+	<key>CFBundleExecutable</key>
+	<string>MiVoice</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.mivoice.MiVoice</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>MiVoice</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>连接小米蓝牙遥控器，接收语音和按键。音频只在本机处理。</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>GPL-3.0-only; portions adapted from HD838A/remote-mic-app</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MiVoice 不访问 Mac 内置麦克风；此说明仅用于系统语音框架的权限检查。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>使用 macOS 离线语音识别把遥控器语音转成文字。音频不会上传。</string>
+</dict>
+</plist>

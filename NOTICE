@@ -1,0 +1,35 @@
+MiVoice
+Copyright (C) 2026 MiVoice contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 only. See LICENSE.
+
+Portions of this project are adapted from:
+
+  SayAll / remote-mic-app
+  https://github.com/HD838A/remote-mic-app
+  Copyright (C) 2026 SayAll contributors
+  License: GPL-3.0-only
+
+  remote-bridge-hub
+  https://github.com/xxb26553663-star/remote-bridge-hub
+  Reference commit: 8a93f321ac71a602300c6cd77f7256fa4b63068e
+  License: GPL-3.0-only
+
+Adapted parts:
+
+  - ATVV service/characteristic UUIDs and capability command bytes
+  - ATVV capability parsing
+  - IMA/DVI ADPCM decoding and frame accumulation
+  - PCM three-point smoothing and bounded gain
+  - Xiaomi RC003 HID vendor/product matching (0x2717 / 0x32B8)
+  - RC003 HID report usage parsing and keyboard-page usage map
+  - Voice key usages (F5 / 0x3E and 0x0C)
+
+MiVoice is an independent, minimal implementation. It does not include the
+SayAll application, its virtual audio driver, its update framework, its
+membership code, its MCP server, or its branding assets.
+
+No logo or icon assets from SayAll are used. MiVoice uses SF Symbols provided
+by macOS.
