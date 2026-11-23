@@ -29,7 +29,7 @@ final class AppModel: NSObject, ObservableObject {
     private var warnedAccessibility = false
     private var started = false
 
-    init() {
+    override init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
            let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) {
             settings = decoded
