@@ -24,7 +24,10 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var partialTranscript = ""
     @Published private(set) var fnMappingStatus = "未启用"
     @Published private(set) var virtualMicLevel: Float = 0
+    @Published private(set) var macMicLevel: Float = 0
+    @Published private(set) var macMicStatus = "未启用"
     @Published var recordingButton: RemoteButton?
+    @Published var recordingTrigger: ButtonTrigger = .singleClick
 
     var onStatusChange: (() -> Void)?
 
@@ -33,6 +36,7 @@ final class AppModel: NSObject, ObservableObject {
     private let speech = SpeechEngine()
     private let hud = HUD()
     private let virtualMic = VirtualMicOutput()
+    private let macMicMonitor = MacMicMonitor()
     private let inputLock = SystemInputLock()
     private let voiceKeyMapper = VoiceKeyMapper()
     private var voiceSessionActive = false
@@ -60,11 +64,17 @@ final class AppModel: NSObject, ObservableObject {
 
         link.delegate = self
         buttons.delegate = self
+        buttons.gestureConfiguration = { [weak self] button in
+            guard let self else { return (false, false) }
+            let gestures = self.settings.gestures(for: button)
+            return (gestures.hasDouble, gestures.hasLong)
+        }
         speech.onFinal = { [weak self] text in self?.handleFinalText(text) }
         speech.onPartial = { [weak self] text in self?.handlePartial(text) }
         speech.onError = { [weak self] message in self?.handleSpeechError(message) }
         speech.onStateChange = { [weak self] state in self?.speechState = state }
         virtualMic.onLevel = { [weak self] value in self?.virtualMicLevel = value }
+        macMicMonitor.onLevel = { [weak self] value in self?.macMicLevel = value }
 
         refreshDiagnostics()
         SpeechEngine.requestAuthorization { [weak self] status in
@@ -126,9 +136,13 @@ final class AppModel: NSObject, ObservableObject {
 
     // MARK: - Settings
 
-    func setBinding(_ binding: ButtonBinding, for button: RemoteButton) {
+    func setBinding(
+        _ binding: ButtonBinding,
+        for button: RemoteButton,
+        trigger: ButtonTrigger = .singleClick
+    ) {
         var copy = settings
-        copy.setBinding(binding, for: button)
+        copy.setBinding(binding, for: button, trigger: trigger)
         settings = copy
         saveSettings()
     }
@@ -327,6 +341,43 @@ final class AppModel: NSObject, ObservableObject {
         applyVoiceModeConfiguration()
     }
 
+    func startMacMicMonitor() {
+        if macMicMonitor.isRunning {
+            macMicStatus = "监听中：\(macMicMonitor.deviceName)"
+            return
+        }
+        macMicMonitor.onLevel = { [weak self] value in self?.macMicLevel = value }
+        switch macMicMonitor.authorizationStatus {
+        case .authorized:
+            if macMicMonitor.start() {
+                macMicStatus = "监听中：\(macMicMonitor.deviceName)"
+            } else {
+                macMicStatus = macMicMonitor.error ?? "内建麦克风不可用"
+            }
+        case .notDetermined:
+            macMicStatus = "等待麦克风授权…"
+            macMicMonitor.requestAccess { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.startMacMicMonitor()
+                    } else {
+                        self.macMicStatus = "未授权麦克风"
+                    }
+                }
+            }
+        default:
+            macMicStatus = "未授权麦克风（系统设置 → 隐私与安全性 → 麦克风）"
+            macMicLevel = 0
+        }
+    }
+
+    func stopMacMicMonitor() {
+        macMicMonitor.stop()
+        macMicLevel = 0
+        macMicStatus = "已停止"
+    }
+
     func testVirtualMic() {
         if !virtualMic.isReady {
             refreshAudioDevices()
@@ -472,7 +523,6 @@ final class AppModel: NSObject, ObservableObject {
         }
         sessionPeak = 0
         virtualMic.beginSession()
-        showHUD("正在听（微信输入法）…", detail: "实时文字由微信输入法显示在输入框", sticky: true)
         onStatusChange?()
     }
 
@@ -505,11 +555,6 @@ final class AppModel: NSObject, ObservableObject {
             // The physical Fn-up already stopped the input method when the
             // remote key was released; just let any queued audio finish.
             activeVoiceMode = .appleSpeech
-            if sessionPeak < 0.003 {
-                showHUD("没有收到遥控器音频", detail: "电平条应跳动；不动就重连遥控器或检查麦克风")
-            } else {
-                showHUD("已交给微信输入法")
-            }
         case .appleSpeech, .automatic:
             if speechState == .listening {
                 speech.finish()
@@ -589,6 +634,7 @@ final class AppModel: NSObject, ObservableObject {
             "虚拟麦克风：\(virtualMicStatus)",
             "系统输入：\(defaultInputName ?? "未知")",
             "Fn 映射：\(fnMappingStatus)",
+            "最近语音峰值：\(String(format: "%.4f", sessionPeak))",
             "Apple 识别：\(speechDiagnostics)",
             "辅助功能：\(accessibilityGranted ? "已授权" : "未授权")",
             "输入监控：\(inputMonitoringGranted ? "已授权" : "未授权")",
@@ -637,17 +683,18 @@ extension AppModel: RemoteLinkDelegate {
 }
 
 extension AppModel: RemoteButtonsDelegate {
-    func remoteButtons(_ buttons: RemoteButtons, didPress button: RemoteButton) {
-        let binding = settings.binding(for: button)
+    func remoteButtons(_ buttons: RemoteButtons, didTrigger button: RemoteButton, trigger: ButtonTrigger) {
+        let binding = settings.binding(for: button, trigger: trigger)
         guard binding.kind != .none else { return }
-        if !accessibilityGranted && (binding.kind == .preset || binding.kind == .shortcut) {
+        if !accessibilityGranted &&
+            (binding.kind == .preset || binding.kind == .shortcut || binding.kind == .text) {
             if !warnedAccessibility {
                 warnedAccessibility = true
                 showHUD("请授权辅助功能以发送按键")
             }
             return
         }
-        KeyInjector.perform(binding)
+        KeyInjector.perform(binding, restoreClipboard: settings.restoreClipboard)
     }
 
     func remoteButtonsDidPressVoice(_ buttons: RemoteButtons) {

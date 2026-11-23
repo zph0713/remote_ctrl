@@ -107,7 +107,7 @@ enum KeyInjector {
         }
     }
 
-    static func perform(_ binding: ButtonBinding) {
+    static func perform(_ binding: ButtonBinding, restoreClipboard: Bool = true) {
         switch binding.kind {
         case .none:
             return
@@ -119,6 +119,9 @@ enum KeyInjector {
             guard let code = binding.keyCode else { return }
             let flags = CGEventFlags(rawValue: UInt64(binding.flags ?? 0))
             postKey(CGKeyCode(code), flags: flags)
+        case .text:
+            guard let text = binding.text, !text.isEmpty else { return }
+            _ = insertText(text, restoreClipboard: restoreClipboard)
         case .openApp:
             guard let path = binding.appPath, !path.isEmpty else { return }
             openApplication(at: path)

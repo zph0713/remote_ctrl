@@ -8,6 +8,8 @@
 	<string>MiVoice</string>
 	<key>CFBundleExecutable</key>
 	<string>MiVoice</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>app.mivoice.MiVoice</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.1</string>
+	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
@@ -35,7 +37,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MiVoice 不访问 Mac 内置麦克风；此说明仅用于系统语音框架的权限检查。</string>
+	<string>设置里的“电脑麦克风”电平对比会读取内建麦克风；音频只在内存中计算电平，不保存、不上传。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>使用 macOS 离线语音识别把遥控器语音转成文字。音频不会上传。</string>
 </dict>

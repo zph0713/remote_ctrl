@@ -160,11 +160,28 @@ public enum VoiceMode: String, CaseIterable, Codable, Hashable, Identifiable, Se
     }
 }
 
+public enum ButtonTrigger: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
+    case singleClick
+    case doubleClick
+    case longPress
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .singleClick: return "单击"
+        case .doubleClick: return "双击"
+        case .longPress: return "长按"
+        }
+    }
+}
+
 public struct ButtonBinding: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
         case none
         case preset
         case shortcut
+        case text
         case openApp
 
         public var title: String {
@@ -172,6 +189,7 @@ public struct ButtonBinding: Codable, Equatable, Sendable {
             case .none: return "无动作"
             case .preset: return "预设动作"
             case .shortcut: return "自定义快捷键"
+            case .text: return "输入文字"
             case .openApp: return "打开应用"
             }
         }
@@ -182,6 +200,7 @@ public struct ButtonBinding: Codable, Equatable, Sendable {
     public var keyCode: UInt16?
     /// CGEventFlags raw value. Kept as UInt so MiVoiceCore stays Foundation-only.
     public var flags: UInt?
+    public var text: String?
     public var appPath: String?
 
     public init(
@@ -189,12 +208,14 @@ public struct ButtonBinding: Codable, Equatable, Sendable {
         preset: PresetAction? = nil,
         keyCode: UInt16? = nil,
         flags: UInt? = nil,
+        text: String? = nil,
         appPath: String? = nil
     ) {
         self.kind = kind
         self.preset = preset
         self.keyCode = keyCode
         self.flags = flags
+        self.text = text
         self.appPath = appPath
     }
 
@@ -208,12 +229,16 @@ public struct ButtonBinding: Codable, Equatable, Sendable {
         ButtonBinding(kind: .shortcut, keyCode: keyCode, flags: flags)
     }
 
+    public static func typing(_ value: String) -> ButtonBinding {
+        ButtonBinding(kind: .text, text: value)
+    }
+
     public static func openApp(path: String) -> ButtonBinding {
         ButtonBinding(kind: .openApp, appPath: path)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, preset, keyCode, flags, appPath
+        case kind, preset, keyCode, flags, text, appPath
     }
 
     public init(from decoder: Decoder) throws {
@@ -230,13 +255,69 @@ public struct ButtonBinding: Codable, Equatable, Sendable {
         }
         keyCode = try container.decodeIfPresent(UInt16.self, forKey: .keyCode)
         flags = try container.decodeIfPresent(UInt.self, forKey: .flags)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
         appPath = try container.decodeIfPresent(String.self, forKey: .appPath)
+    }
+}
+
+public struct ButtonGestures: Codable, Equatable, Sendable {
+    public var single: ButtonBinding
+    public var double: ButtonBinding
+    public var long: ButtonBinding
+
+    public init(
+        single: ButtonBinding = .none,
+        double: ButtonBinding = .none,
+        long: ButtonBinding = .none
+    ) {
+        self.single = single
+        self.double = double
+        self.long = long
+    }
+
+    public subscript(trigger: ButtonTrigger) -> ButtonBinding {
+        get {
+            switch trigger {
+            case .singleClick: return single
+            case .doubleClick: return double
+            case .longPress: return long
+            }
+        }
+        set {
+            switch trigger {
+            case .singleClick: single = newValue
+            case .doubleClick: double = newValue
+            case .longPress: long = newValue
+            }
+        }
+    }
+
+    public var hasDouble: Bool { double.kind != .none }
+    public var hasLong: Bool { long.kind != .none }
+
+    private enum CodingKeys: String, CodingKey {
+        case single, double, long
+    }
+
+    /// Migrates a settings file written before gestures existed: the old value
+    /// was a single ButtonBinding object, so it becomes the single-click action.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.single) || container.contains(.double) || container.contains(.long) {
+            single = try container.decodeIfPresent(ButtonBinding.self, forKey: .single) ?? .none
+            double = try container.decodeIfPresent(ButtonBinding.self, forKey: .double) ?? .none
+            long = try container.decodeIfPresent(ButtonBinding.self, forKey: .long) ?? .none
+        } else {
+            single = try ButtonBinding(from: decoder)
+            double = .none
+            long = .none
+        }
     }
 }
 
 public struct AppSettings: Codable, Equatable, Sendable {
     public var localeIdentifier: String
-    public var bindings: [String: ButtonBinding]
+    public var bindings: [String: ButtonGestures]
     public var launchAtLogin: Bool
     public var showHUD: Bool
     public var restoreClipboard: Bool
@@ -246,7 +327,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public init(
         localeIdentifier: String = "zh-CN",
-        bindings: [String: ButtonBinding] = AppSettings.defaultBindings,
+        bindings: [String: ButtonGestures] = AppSettings.defaultBindings,
         launchAtLogin: Bool = false,
         showHUD: Bool = true,
         restoreClipboard: Bool = true,
@@ -265,27 +346,45 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     public func binding(for button: RemoteButton) -> ButtonBinding {
-        bindings[button.rawValue] ?? .none
+        binding(for: button, trigger: .singleClick)
+    }
+
+    public func binding(for button: RemoteButton, trigger: ButtonTrigger) -> ButtonBinding {
+        bindings[button.rawValue]?[trigger] ?? .none
+    }
+
+    public func gestures(for button: RemoteButton) -> ButtonGestures {
+        bindings[button.rawValue] ?? ButtonGestures()
     }
 
     public mutating func setBinding(_ binding: ButtonBinding, for button: RemoteButton) {
-        bindings[button.rawValue] = binding
+        setBinding(binding, for: button, trigger: .singleClick)
     }
 
-    public static var defaultBindings: [String: ButtonBinding] {
-        var result: [String: ButtonBinding] = [:]
-        result[RemoteButton.up.rawValue] = .presetAction(.arrowUp)
-        result[RemoteButton.down.rawValue] = .presetAction(.arrowDown)
-        result[RemoteButton.left.rawValue] = .presetAction(.arrowLeft)
-        result[RemoteButton.right.rawValue] = .presetAction(.arrowRight)
-        result[RemoteButton.ok.rawValue] = .presetAction(.returnKey)
-        result[RemoteButton.back.rawValue] = .presetAction(.deleteBackward)
-        result[RemoteButton.home.rawValue] = .presetAction(.showDesktop)
-        result[RemoteButton.menu.rawValue] = .presetAction(.contextMenu)
-        result[RemoteButton.tv.rawValue] = .presetAction(.appSwitcher)
-        result[RemoteButton.power.rawValue] = ButtonBinding(kind: .none)
-        result[RemoteButton.volumeUp.rawValue] = .presetAction(.volumeUp)
-        result[RemoteButton.volumeDown.rawValue] = .presetAction(.volumeDown)
+    public mutating func setBinding(
+        _ binding: ButtonBinding,
+        for button: RemoteButton,
+        trigger: ButtonTrigger
+    ) {
+        var value = bindings[button.rawValue] ?? ButtonGestures()
+        value[trigger] = binding
+        bindings[button.rawValue] = value
+    }
+
+    public static var defaultBindings: [String: ButtonGestures] {
+        var result: [String: ButtonGestures] = [:]
+        result[RemoteButton.up.rawValue] = ButtonGestures(single: .presetAction(.arrowUp))
+        result[RemoteButton.down.rawValue] = ButtonGestures(single: .presetAction(.arrowDown))
+        result[RemoteButton.left.rawValue] = ButtonGestures(single: .presetAction(.arrowLeft))
+        result[RemoteButton.right.rawValue] = ButtonGestures(single: .presetAction(.arrowRight))
+        result[RemoteButton.ok.rawValue] = ButtonGestures(single: .presetAction(.returnKey))
+        result[RemoteButton.back.rawValue] = ButtonGestures(single: .presetAction(.deleteBackward))
+        result[RemoteButton.home.rawValue] = ButtonGestures(single: .presetAction(.showDesktop))
+        result[RemoteButton.menu.rawValue] = ButtonGestures(single: .presetAction(.contextMenu))
+        result[RemoteButton.tv.rawValue] = ButtonGestures(single: .presetAction(.appSwitcher))
+        result[RemoteButton.power.rawValue] = ButtonGestures(single: ButtonBinding(kind: .none))
+        result[RemoteButton.volumeUp.rawValue] = ButtonGestures(single: .presetAction(.volumeUp))
+        result[RemoteButton.volumeDown.rawValue] = ButtonGestures(single: .presetAction(.volumeDown))
         return result
     }
 
@@ -297,7 +396,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         localeIdentifier = try container.decodeIfPresent(String.self, forKey: .localeIdentifier) ?? "zh-CN"
-        let stored = try container.decodeIfPresent([String: ButtonBinding].self, forKey: .bindings) ?? [:]
+        let stored = try container.decodeIfPresent([String: ButtonGestures].self, forKey: .bindings) ?? [:]
         var merged = AppSettings.defaultBindings
         for (key, value) in stored {
             merged[key] = value

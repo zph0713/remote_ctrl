@@ -3,7 +3,7 @@ import IOKit.hid
 import MiVoiceCore
 
 protocol RemoteButtonsDelegate: AnyObject {
-    func remoteButtons(_ buttons: RemoteButtons, didPress button: RemoteButton)
+    func remoteButtons(_ buttons: RemoteButtons, didTrigger button: RemoteButton, trigger: ButtonTrigger)
     func remoteButtonsDidPressVoice(_ buttons: RemoteButtons)
     func remoteButtonsDidReleaseVoice(_ buttons: RemoteButtons)
     func remoteButtons(_ buttons: RemoteButtons, didChange mode: RemoteButtons.Mode)
@@ -78,6 +78,15 @@ final class RemoteButtons {
     private var actionsEnabled = false
     private var activeUsages = Set<UInt16>()
     private var lastReport: (usages: Set<UInt16>, time: TimeInterval)?
+    private var gestures = ButtonGestureRecognizer()
+    private var doubleTimers: [RemoteButton: DispatchWorkItem] = [:]
+    private var longTimers: [RemoteButton: DispatchWorkItem] = [:]
+    /// Returns which gestures are configured for a button. A button with no
+    /// double/long action fires its single action immediately instead of
+    /// waiting for a timeout.
+    var gestureConfiguration: ((RemoteButton) -> (double: Bool, long: Bool))?
+    var doubleClickInterval: TimeInterval = 0.30
+    var longPressInterval: TimeInterval = 0.55
 
     var isSeized: Bool { seized }
     var isActionsEnabled: Bool { actionsEnabled }
@@ -151,6 +160,8 @@ final class RemoteButtons {
         actionsEnabled = false
         activeUsages.removeAll()
         lastReport = nil
+        cancelGestureTimers()
+        gestures.reset()
         mode = .off
     }
 
@@ -195,14 +206,77 @@ final class RemoteButtons {
         for usage in pressed.sorted() {
             if RemoteButton.voiceUsages.contains(usage) { continue }
             if let button = RemoteButton.usageMap[usage] {
-                delegate?.remoteButtons(self, didPress: button)
+                handleGesture(.press, button: button)
             } else {
                 unknown.append(usage)
+            }
+        }
+        for usage in released.sorted() {
+            if RemoteButton.voiceUsages.contains(usage) { continue }
+            if let button = RemoteButton.usageMap[usage] {
+                handleGesture(.release, button: button)
             }
         }
         if !unknown.isEmpty {
             delegate?.remoteButtons(self, didSeeUnknown: unknown)
         }
+    }
+
+    private func handleGesture(_ phase: RemoteButtonPhase, button: RemoteButton) {
+        let options = gestureConfiguration?(button) ?? (false, false)
+        let commands = gestures.handle(
+            phase,
+            button: button,
+            recognizesDoubleClick: options.double,
+            recognizesLongPress: options.long
+        )
+        apply(commands)
+    }
+
+    private func apply(_ commands: [ButtonGestureRecognizer.Command]) {
+        for command in commands {
+            switch command {
+            case .scheduleDoubleClickTimeout(let button):
+                doubleTimers[button]?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.doubleTimers[button] = nil
+                    self.apply(self.gestures.doubleClickTimedOut(button))
+                }
+                doubleTimers[button] = work
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + doubleClickInterval,
+                    execute: work
+                )
+            case .cancelDoubleClickTimeout(let button):
+                doubleTimers[button]?.cancel()
+                doubleTimers[button] = nil
+            case .scheduleLongPressTimeout(let button):
+                longTimers[button]?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.longTimers[button] = nil
+                    self.apply(self.gestures.longPressTimedOut(button))
+                }
+                longTimers[button] = work
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + longPressInterval,
+                    execute: work
+                )
+            case .cancelLongPressTimeout(let button):
+                longTimers[button]?.cancel()
+                longTimers[button] = nil
+            case .trigger(let button, let trigger):
+                delegate?.remoteButtons(self, didTrigger: button, trigger: trigger)
+            }
+        }
+    }
+
+    private func cancelGestureTimers() {
+        for work in doubleTimers.values { work.cancel() }
+        for work in longTimers.values { work.cancel() }
+        doubleTimers.removeAll()
+        longTimers.removeAll()
     }
 
     private func updateReadyMode() {

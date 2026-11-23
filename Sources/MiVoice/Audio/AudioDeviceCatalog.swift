@@ -32,6 +32,37 @@ enum CoreAudioDeviceCatalog {
         }
     }
 
+    /// The Mac's built-in microphone, independent of the current system default.
+    /// Used only for the settings level comparison, never for recognition.
+    static func builtInInputDevice() -> AudioDeviceInfo? {
+        let inputs = inputDevices()
+        if let builtIn = inputs.first(where: { device in
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyTransportType,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var transport: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(
+                device.id,
+                &address,
+                0,
+                nil,
+                &size,
+                &transport
+            ) == noErr else { return false }
+            return transport == kAudioDeviceTransportTypeBuiltIn
+        }) {
+            return builtIn
+        }
+        return inputs.first {
+            $0.name.localizedCaseInsensitiveContains("MacBook")
+                || $0.name.contains("内建")
+                || $0.name.localizedCaseInsensitiveContains("Built-in")
+        }
+    }
+
     static func defaultInputDeviceUID() -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,

@@ -169,4 +169,140 @@ final class SettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ButtonBinding.self, from: json)
         XCTAssertEqual(decoded.kind, .none)
     }
+
+    func testGesturesRoundTrip() throws {
+        var settings = AppSettings()
+        settings.setBinding(.presetAction(.copy), for: .ok, trigger: .singleClick)
+        settings.setBinding(.presetAction(.paste), for: .ok, trigger: .doubleClick)
+        settings.setBinding(.typing("完成了。"), for: .ok, trigger: .longPress)
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .singleClick).preset, .copy)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .doubleClick).preset, .paste)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .longPress).text, "完成了。")
+    }
+
+    func testLegacyBindingDecodesAsSingleClick() throws {
+        let json = Data(#"{"bindings":{"ok":{"kind":"preset","preset":"returnKey"}}}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .singleClick).preset, .returnKey)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .doubleClick).kind, .none)
+        XCTAssertEqual(decoded.binding(for: .ok, trigger: .longPress).kind, .none)
+    }
+
+    func testTextBindingRoundTrip() throws {
+        let binding = ButtonBinding.typing("你好")
+        let data = try JSONEncoder().encode(binding)
+        let decoded = try JSONDecoder().decode(ButtonBinding.self, from: data)
+        XCTAssertEqual(decoded.kind, .text)
+        XCTAssertEqual(decoded.text, "你好")
+    }
+}
+
+final class ButtonGestureRecognizerTests: XCTestCase {
+    func testSingleClickFiresImmediatelyWhenOtherGesturesAreAbsent() {
+        var recognizer = ButtonGestureRecognizer()
+        XCTAssertTrue(
+            recognizer.handle(
+                .press,
+                button: .ok,
+                recognizesDoubleClick: false,
+                recognizesLongPress: false
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            recognizer.handle(
+                .release,
+                button: .ok,
+                recognizesDoubleClick: false,
+                recognizesLongPress: false
+            ),
+            [.trigger(.ok, .singleClick)]
+        )
+    }
+
+    func testDoubleClickWaitsForSecondPress() {
+        var recognizer = ButtonGestureRecognizer()
+        XCTAssertTrue(
+            recognizer.handle(
+                .press,
+                button: .ok,
+                recognizesDoubleClick: true,
+                recognizesLongPress: false
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            recognizer.handle(
+                .release,
+                button: .ok,
+                recognizesDoubleClick: true,
+                recognizesLongPress: false
+            ),
+            [.scheduleDoubleClickTimeout(.ok)]
+        )
+        XCTAssertEqual(
+            recognizer.handle(
+                .press,
+                button: .ok,
+                recognizesDoubleClick: true,
+                recognizesLongPress: false
+            ),
+            [.cancelDoubleClickTimeout(.ok)]
+        )
+        XCTAssertEqual(
+            recognizer.handle(
+                .release,
+                button: .ok,
+                recognizesDoubleClick: true,
+                recognizesLongPress: false
+            ),
+            [.trigger(.ok, .doubleClick)]
+        )
+    }
+
+    func testDoubleClickTimeoutFallsBackToSingle() {
+        var recognizer = ButtonGestureRecognizer()
+        _ = recognizer.handle(
+            .press,
+            button: .ok,
+            recognizesDoubleClick: true,
+            recognizesLongPress: false
+        )
+        _ = recognizer.handle(
+            .release,
+            button: .ok,
+            recognizesDoubleClick: true,
+            recognizesLongPress: false
+        )
+        XCTAssertEqual(
+            recognizer.doubleClickTimedOut(.ok),
+            [.trigger(.ok, .singleClick)]
+        )
+    }
+
+    func testLongPressFiresOnceAndSuppressesReleaseClick() {
+        var recognizer = ButtonGestureRecognizer()
+        XCTAssertEqual(
+            recognizer.handle(
+                .press,
+                button: .ok,
+                recognizesDoubleClick: false,
+                recognizesLongPress: true
+            ),
+            [.scheduleLongPressTimeout(.ok)]
+        )
+        XCTAssertEqual(
+            recognizer.longPressTimedOut(.ok),
+            [.trigger(.ok, .longPress)]
+        )
+        XCTAssertEqual(
+            recognizer.handle(
+                .release,
+                button: .ok,
+                recognizesDoubleClick: false,
+                recognizesLongPress: true
+            ),
+            [.cancelLongPressTimeout(.ok)]
+        )
+    }
 }

@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let model = AppModel()
 
     private var statusItem: NSStatusItem?
@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.toolTip = "MiVoice"
-        item.button?.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "MiVoice")
+        item.button?.image = menuBarImage()
         item.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.delegate = self
@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        model.stopMacMicMonitor()
         model.stop()
     }
 
@@ -78,11 +79,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 740, height: 780))
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.center()
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+        model.startMacMicMonitor()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        model.stopMacMicMonitor()
     }
 
     @objc private func reconnectRemote() {
@@ -111,22 +118,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func refreshStatusIcon() {
         guard let statusItem else { return }
-        let symbol: String
+        let image: NSImage?
         if model.isRecording {
-            symbol = "waveform"
+            image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "MiVoice 正在听")
         } else {
             switch model.linkState {
-            case .ready:
-                symbol = "mic.fill"
             case .failed, .unauthorized, .bluetoothOff:
-                symbol = "mic.slash"
+                image = NSImage(systemSymbolName: "mic.slash", accessibilityDescription: "MiVoice 未连接")
             default:
-                symbol = "mic"
+                image = menuBarImage()
             }
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "MiVoice")
         image?.isTemplate = true
         statusItem.button?.image = image
+    }
+
+    /// Custom mic + radio-wave template, distinct from the system microphone.
+    private func menuBarImage() -> NSImage? {
+        if let image = NSImage(named: "MenuBarIcon") {
+            image.size = NSSize(width: 18, height: 18)
+            image.isTemplate = true
+            return image
+        }
+        let fallback = NSImage(
+            systemSymbolName: "dot.radiowaves.left.and.right",
+            accessibilityDescription: "MiVoice"
+        )
+        fallback?.isTemplate = true
+        return fallback
     }
 }
 

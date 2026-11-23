@@ -26,10 +26,12 @@ struct SettingsView: View {
         .onAppear {
             model.refreshDiagnostics()
             model.refreshPermissions()
+            model.startMacMicMonitor()
         }
         .onDisappear {
             removeMonitor()
             model.recordingButton = nil
+            model.stopMacMicMonitor()
         }
         .onChange(of: model.recordingButton) { _, newValue in
             removeMonitor()
@@ -51,7 +53,8 @@ struct SettingsView: View {
                 if modifiers.contains(.shift) { flags.insert(.maskShift) }
                 model.setBinding(
                     .shortcut(keyCode: event.keyCode, flags: UInt(flags.rawValue)),
-                    for: button
+                    for: button,
+                    trigger: model.recordingTrigger
                 )
                 DispatchQueue.main.async {
                     model.recordingButton = nil
@@ -63,9 +66,9 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "mic.fill")
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundColor(.accentColor)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text("MiVoice").font(.title2.weight(.semibold))
                 Text("小米遥控器 → 本机语音输入")
@@ -140,21 +143,21 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
-                Text("电平").font(.caption).foregroundStyle(.secondary)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.15))
-                        Capsule()
-                            .fill(model.virtualMicLevel > 0.01 ? Color.green : Color.secondary.opacity(0.35))
-                            .frame(width: max(2, geo.size.width * CGFloat(min(1, model.virtualMicLevel * 12))))
-                    }
-                }
-                .frame(height: 6)
+            levelRow(
+                title: "遥控器麦克风",
+                level: model.virtualMicLevel,
+                detail: "BLE 音频 → 虚拟麦"
+            )
+            levelRow(
+                title: "电脑麦克风",
+                level: model.macMicLevel,
+                detail: model.macMicStatus
+            )
+            HStack {
                 Button("测试虚拟麦克风") { model.testVirtualMic() }
                 Spacer()
             }
-            Text("按住遥控器说话时，这里的电平应跳动；不跳说明音频没进虚拟麦克风。")
+            Text("对着遥控器说话看第一条，对着电脑说话看第二条。电脑麦克风只在设置窗口打开时监听，不参与识别。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -176,6 +179,29 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundColor(.orange)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func levelRow(title: String, level: Float, detail: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 88, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.15))
+                    Capsule()
+                        .fill(level > 0.01 ? Color.green : Color.secondary.opacity(0.35))
+                        .frame(width: max(2, geo.size.width * CGFloat(min(1, level * 12))))
+                }
+            }
+            .frame(height: 6)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 190, alignment: .trailing)
         }
     }
 
@@ -207,12 +233,16 @@ struct SettingsView: View {
     private var buttonsCard: some View {
         card("遥控器按键") {
             HStack {
-                Text("按键").frame(width: 84, alignment: .leading)
-                Text("动作").frame(width: 132, alignment: .leading)
-                Text("设置").frame(maxWidth: .infinity, alignment: .leading)
+                Text("按键").frame(width: 64, alignment: .leading)
+                Text("手势").frame(width: 132, alignment: .leading)
+                Text("动作与设置").frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            Text("每个按键可分别设置单击、双击、长按。双击窗口 300ms，长按 550ms；未配置双击/长按时会立即执行单击。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             ForEach(RemoteButton.allCases) { button in
                 ButtonBindingRow(model: model, button: button)
@@ -373,14 +403,25 @@ private struct ButtonBindingRow: View {
     @ObservedObject var model: AppModel
     let button: RemoteButton
 
+    @State private var trigger: ButtonTrigger = .singleClick
+
     private var binding: ButtonBinding {
-        model.settings.binding(for: button)
+        model.settings.binding(for: button, trigger: trigger)
     }
 
     var body: some View {
         HStack(spacing: 8) {
             Text(button.title)
-                .frame(width: 84, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
+
+            Picker("", selection: $trigger) {
+                ForEach(ButtonTrigger.allCases) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 132)
 
             Picker("", selection: kindBinding) {
                 ForEach(ButtonBinding.Kind.allCases, id: \.self) { kind in
@@ -388,7 +429,7 @@ private struct ButtonBindingRow: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 132)
+            .frame(width: 118)
 
             Group {
                 switch binding.kind {
@@ -407,13 +448,22 @@ private struct ButtonBindingRow: View {
                         Text(shortcutLabel)
                             .font(.system(.body, design: .monospaced))
                             .frame(minWidth: 100, alignment: .leading)
-                        Button(model.recordingButton == button ? "按键…" : "录制") {
-                            model.recordingButton = model.recordingButton == button ? nil : button
+                        Button(isRecording ? "按键…" : "录制") {
+                            if isRecording {
+                                model.recordingButton = nil
+                            } else {
+                                model.recordingButton = button
+                                model.recordingTrigger = trigger
+                            }
                         }
-                        if model.recordingButton == button {
+                        if isRecording {
                             Text("按 Esc 取消").font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                case .text:
+                    TextField("要输入的文字", text: textBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
                 case .openApp:
                     HStack(spacing: 8) {
                         Text(appName)
@@ -429,6 +479,10 @@ private struct ButtonBindingRow: View {
         .frame(minHeight: 30)
     }
 
+    private var isRecording: Bool {
+        model.recordingButton == button && model.recordingTrigger == trigger
+    }
+
     private var kindBinding: Binding<ButtonBinding.Kind> {
         Binding(
             get: { binding.kind },
@@ -442,7 +496,10 @@ private struct ButtonBindingRow: View {
                     next.keyCode = 36
                     next.flags = 0
                 }
-                model.setBinding(next, for: button)
+                if kind == .text, next.text == nil {
+                    next.text = ""
+                }
+                model.setBinding(next, for: button, trigger: trigger)
             }
         )
     }
@@ -454,7 +511,19 @@ private struct ButtonBindingRow: View {
                 var next = binding
                 next.kind = .preset
                 next.preset = preset
-                model.setBinding(next, for: button)
+                model.setBinding(next, for: button, trigger: trigger)
+            }
+        )
+    }
+
+    private var textBinding: Binding<String> {
+        Binding(
+            get: { binding.text ?? "" },
+            set: { value in
+                var next = binding
+                next.kind = .text
+                next.text = value
+                model.setBinding(next, for: button, trigger: trigger)
             }
         )
     }
@@ -477,6 +546,6 @@ private struct ButtonBindingRow: View {
         panel.allowsMultipleSelection = false
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.setBinding(.openApp(path: url.path), for: button)
+        model.setBinding(.openApp(path: url.path), for: button, trigger: trigger)
     }
 }
