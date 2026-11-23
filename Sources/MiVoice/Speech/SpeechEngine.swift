@@ -72,6 +72,11 @@ final class SpeechEngine {
 
     @discardableResult
     func start(localeIdentifier: String) -> Bool {
+        // A very fast second press can arrive while the previous utterance is
+        // still finalizing. Deliver its best transcript instead of dropping it.
+        if state == .finishing, !bestText.isEmpty {
+            onFinal?(bestText)
+        }
         cancel()
 
         let status = SFSpeechRecognizer.authorizationStatus()
