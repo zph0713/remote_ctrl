@@ -14,6 +14,8 @@ final class VirtualMicOutput {
     private var generation: UInt64 = 0
     private var drainCompletion: (() -> Void)?
     private(set) var queuedFrames = 0
+    private(set) var level: Float = 0
+    var onLevel: ((Float) -> Void)?
     private(set) var error: String?
     private(set) var deviceUID = ""
     private var selectedDeviceID: AudioDeviceID = 0
@@ -98,9 +100,15 @@ final class VirtualMicOutput {
             error = "虚拟麦克风缓冲已满，请重新连接"
             return false
         }
+        var sumSquares: Double = 0
         for index in samples.indices {
-            channel[index] = Float(samples[index]) / 32_768.0
+            let value = Float(samples[index]) / 32_768.0
+            channel[index] = value
+            sumSquares += Double(value) * Double(value)
         }
+        let rms = Float(sqrt(sumSquares / Double(samples.count)))
+        level = rms
+        onLevel?(rms)
         buffer.frameLength = AVAudioFrameCount(samples.count)
         queuedFrames += samples.count
         let token = generation
@@ -124,8 +132,24 @@ final class VirtualMicOutput {
         drainCompletion = nil
         generation &+= 1
         queuedFrames = 0
+        level = 0
+        onLevel?(0)
         player?.stop()
         if isReady { player?.play() }
+    }
+
+    /// Plays a short 440 Hz tone through the loopback device. Useful to verify
+    /// that the input side (BlackHole 2ch) actually receives audio.
+    func playTestTone(seconds: Double = 0.9) {
+        guard isReady else { return }
+        let count = Int(16_000 * seconds)
+        var samples = [Int16](repeating: 0, count: count)
+        for index in 0 ..< count {
+            let envelope = min(1.0, min(Double(index) / 800.0, Double(count - index) / 800.0))
+            let value = sin(2.0 * Double.pi * 440.0 * Double(index) / 16_000.0) * 0.25 * envelope
+            samples[index] = Int16(value * 32_767.0)
+        }
+        enqueue(samples)
     }
 
     func whenDrained(_ completion: @escaping () -> Void) {
@@ -146,6 +170,8 @@ final class VirtualMicOutput {
         engine = nil
         format = nil
         queuedFrames = 0
+        level = 0
+        onLevel?(0)
         deviceUID = ""
         selectedDeviceID = 0
     }

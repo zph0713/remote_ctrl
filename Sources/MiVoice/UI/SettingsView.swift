@@ -140,13 +140,34 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            HStack(spacing: 8) {
+                Text("电平").font(.caption).foregroundStyle(.secondary)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.15))
+                        Capsule()
+                            .fill(model.virtualMicLevel > 0.01 ? Color.green : Color.secondary.opacity(0.35))
+                            .frame(width: max(2, geo.size.width * CGFloat(min(1, model.virtualMicLevel * 12))))
+                    }
+                }
+                .frame(height: 6)
+                Button("测试虚拟麦克风") { model.testVirtualMic() }
+                Spacer()
+            }
+            Text("按住遥控器说话时，这里的电平应跳动；不跳说明音频没进虚拟麦克风。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
             HStack {
-                Button("测试 Fn 触发") { model.testIMETrigger() }
+                Button("重新应用 Fn 映射") { model.reapplyVoiceMapping() }
                 Button("打开声音设置") { model.openSoundSettings() }
                 Spacer()
             }
+            Text("Fn 映射：\(model.fnMappingStatus)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-            Text("微信输入法 2.0+ 默认按住 Fn 说话。选“微信输入法”后，MiVoice 会把遥控器语音键变成 Fn，并把 16 kHz 音频写进上面的虚拟麦克风。请先安装 BlackHole 2ch（或使用 SayAll 的 MiRemoteV 2ch）。")
+            Text("微信输入法 2.0+ 默认按住 Fn 说话。选“微信输入法”后，MiVoice 在 HID 层把遥控器 F5 映射成 Fn（与物理 Fn 相同），并把 16 kHz 音频写进上面的虚拟麦克风。请先安装 BlackHole 2ch（或使用 SayAll 的 MiRemoteV 2ch）。")
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

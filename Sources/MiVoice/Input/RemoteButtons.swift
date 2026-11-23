@@ -35,22 +35,29 @@ final class RemoteButtons {
     enum Mode: Equatable {
         case off
         case starting
-        case ready(seized: Bool, devices: Int)
+        case ready(seized: Bool, actions: Bool, devices: Int)
         case failed(String)
 
         var text: String {
             switch self {
             case .off: return "未启用"
             case .starting: return "正在打开按键通道…"
-            case .ready(let seized, let devices):
+            case .ready(let seized, let actions, let devices):
                 if devices == 0 { return "等待遥控器按键…" }
-                return seized ? "已独占（自定义按键可用）" : "仅监听（自定义按键停用）"
+                if seized { return "已独占（自定义按键可用）" }
+                if actions { return "Fn 映射模式（自定义按键可用）" }
+                return "仅监听（自定义按键停用）"
             case .failed(let message): return message
             }
         }
 
         var isSeized: Bool {
-            if case .ready(let seized, _) = self { return seized }
+            if case .ready(let seized, _, _) = self { return seized }
+            return false
+        }
+
+        var actionsEnabled: Bool {
+            if case .ready(_, let actions, _) = self { return actions }
             return false
         }
     }
@@ -68,10 +75,14 @@ final class RemoteButtons {
     private var manager: IOHIDManager?
     private var deviceCount = 0
     private var seized = false
+    private var actionsEnabled = false
     private var activeUsages = Set<UInt16>()
     private var lastReport: (usages: Set<UInt16>, time: TimeInterval)?
 
-    func start() {
+    var isSeized: Bool { seized }
+    var isActionsEnabled: Bool { actionsEnabled }
+
+    func start(seize: Bool = true, allowActions: Bool = false) {
         guard manager == nil else { return }
         guard Permissions.inputMonitoring else {
             mode = .failed("未授予输入监控，自定义按键不可用")
@@ -96,12 +107,17 @@ final class RemoteButtons {
             CFRunLoopMode.commonModes.rawValue
         )
 
-        var result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
-        var didSeize = true
-        if result != kIOReturnSuccess {
-            Log.info("HID seize refused, falling back to monitor-only")
+        var result: IOReturn
+        var didSeize = false
+        if seize {
+            result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeSeizeDevice))
+            didSeize = result == kIOReturnSuccess
+            if result != kIOReturnSuccess {
+                Log.info("HID seize refused, falling back to monitor-only")
+                result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            }
+        } else {
             result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-            didSeize = false
         }
         guard result == kIOReturnSuccess else {
             IOHIDManagerUnscheduleFromRunLoop(
@@ -115,8 +131,9 @@ final class RemoteButtons {
 
         self.manager = manager
         self.seized = didSeize
-        mode = .ready(seized: didSeize, devices: deviceCount)
-        Log.info("HID started seized=\(didSeize)")
+        self.actionsEnabled = didSeize || allowActions
+        mode = .ready(seized: didSeize, actions: self.actionsEnabled, devices: deviceCount)
+        Log.info("HID started seized=\(didSeize) actions=\(self.actionsEnabled)")
     }
 
     func stop() {
@@ -131,6 +148,7 @@ final class RemoteButtons {
         manager = nil
         deviceCount = 0
         seized = false
+        actionsEnabled = false
         activeUsages.removeAll()
         lastReport = nil
         mode = .off
@@ -169,7 +187,7 @@ final class RemoteButtons {
             delegate?.remoteButtonsDidReleaseVoice(self)
         }
 
-        guard seized else {
+        guard actionsEnabled else {
             return
         }
 
@@ -189,6 +207,6 @@ final class RemoteButtons {
 
     private func updateReadyMode() {
         guard manager != nil else { return }
-        mode = .ready(seized: seized, devices: deviceCount)
+        mode = .ready(seized: seized, actions: actionsEnabled, devices: deviceCount)
     }
 }

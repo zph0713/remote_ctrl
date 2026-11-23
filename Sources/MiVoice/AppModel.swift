@@ -22,6 +22,8 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var virtualMicStatus = ""
     @Published private(set) var activeVoiceMode: VoiceMode = .appleSpeech
     @Published private(set) var partialTranscript = ""
+    @Published private(set) var fnMappingStatus = "未启用"
+    @Published private(set) var virtualMicLevel: Float = 0
     @Published var recordingButton: RemoteButton?
 
     var onStatusChange: (() -> Void)?
@@ -32,12 +34,12 @@ final class AppModel: NSObject, ObservableObject {
     private let hud = HUD()
     private let virtualMic = VirtualMicOutput()
     private let inputLock = SystemInputLock()
-    private let fnTrigger = FnTrigger()
+    private let voiceKeyMapper = VoiceKeyMapper()
     private var voiceSessionActive = false
+    private var sessionPeak: Float = 0
     private var warnedAccessibility = false
     private var started = false
-    private var imeGeneration: UInt64 = 0
-    private var imeReleaseWork: DispatchWorkItem?
+    private var applyingVoiceConfig = false
 
     override init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
@@ -62,6 +64,7 @@ final class AppModel: NSObject, ObservableObject {
         speech.onPartial = { [weak self] text in self?.handlePartial(text) }
         speech.onError = { [weak self] message in self?.handleSpeechError(message) }
         speech.onStateChange = { [weak self] state in self?.speechState = state }
+        virtualMic.onLevel = { [weak self] value in self?.virtualMicLevel = value }
 
         refreshDiagnostics()
         SpeechEngine.requestAuthorization { [weak self] status in
@@ -71,10 +74,10 @@ final class AppModel: NSObject, ObservableObject {
         }
 
         link.start()
-        buttons.start()
         refreshPermissions()
         refreshAudioDevices()
         configureVirtualMic()
+        applyVoiceModeConfiguration()
 
         NotificationCenter.default.addObserver(
             self,
@@ -91,10 +94,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stop() {
-        imeReleaseWork?.cancel()
-        imeReleaseWork = nil
-        imeGeneration &+= 1
-        fnTrigger.release()
+        voiceKeyMapper.restore()
         inputLock.unlock()
         virtualMic.stop()
         link.stop()
@@ -108,15 +108,16 @@ final class AppModel: NSObject, ObservableObject {
         refreshDiagnostics()
         refreshAudioDevices()
         if virtualMic.deviceUID.isEmpty { configureVirtualMic() }
+        if resolvedVoiceMode == .wechatIME, virtualMic.isReady, settings.lockSystemInput {
+            _ = inputLock.lock(to: virtualMic.deviceUID)
+        }
     }
 
     @objc private func systemDidWake() {
-        if !buttons.mode.isSeized {
-            buttons.stop()
-            buttons.start()
-        }
         refreshAudioDevices()
         configureVirtualMic()
+        buttons.stop()
+        applyVoiceModeConfiguration()
         if case .ready = linkState { return }
         link.reconnectNow()
     }
@@ -153,26 +154,22 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func setVoiceMode(_ mode: VoiceMode) {
-        if activeVoiceMode == .wechatIME {
-            finishIME(token: imeGeneration)
-        }
         var copy = settings
         copy.voiceMode = mode
         settings = copy
         saveSettings()
         configureVirtualMic()
+        applyVoiceModeConfiguration()
         onStatusChange?()
     }
 
     func setVirtualDevice(_ uid: String) {
-        if activeVoiceMode == .wechatIME {
-            finishIME(token: imeGeneration)
-        }
         var copy = settings
         copy.virtualDeviceUID = uid
         settings = copy
         saveSettings()
         configureVirtualMic()
+        applyVoiceModeConfiguration()
     }
 
     func setLockSystemInput(_ value: Bool) {
@@ -180,7 +177,12 @@ final class AppModel: NSObject, ObservableObject {
         copy.lockSystemInput = value
         settings = copy
         saveSettings()
-        if !value { inputLock.unlock() }
+        if value, resolvedVoiceMode == .wechatIME, virtualMic.isReady {
+            _ = inputLock.lock(to: virtualMic.deviceUID)
+        } else if !value {
+            inputLock.unlock()
+        }
+        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
     }
 
     func refreshAudioDevices() {
@@ -231,7 +233,7 @@ final class AppModel: NSObject, ObservableObject {
 
     var voiceStatusText: String {
         if resolvedVoiceMode == .wechatIME {
-            return virtualMic.isReady ? "微信输入法 · 虚拟麦克风就绪" : "微信输入法 · 虚拟麦克风未就绪"
+            return virtualMic.isReady ? "微信输入法 · \(fnMappingStatus)" : "微信输入法 · 虚拟麦克风未就绪"
         }
         return "Apple 离线识别 · \(SpeechEngine.authorizationText())"
     }
@@ -244,20 +246,91 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
-    func testIMETrigger() {
+    func applyVoiceModeConfiguration() {
+        guard !applyingVoiceConfig else { return }
+        applyingVoiceConfig = true
+        defer { applyingVoiceConfig = false }
+
+        let ime = resolvedVoiceMode == .wechatIME
+        guard ime else {
+            voiceKeyMapper.restore()
+            fnMappingStatus = "未启用（Apple 模式）"
+            inputLock.unlock()
+            defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+            if !buttons.isSeized {
+                buttons.stop()
+                buttons.start(seize: true, allowActions: false)
+            }
+            onStatusChange?()
+            return
+        }
+
         if !virtualMic.isReady {
             refreshAudioDevices()
             configureVirtualMic()
         }
-        guard fnTrigger.press() else {
-            showHUD(fnTrigger.lastError ?? "无法发送 Fn")
+        guard virtualMic.isReady else {
+            fnMappingStatus = "虚拟麦克风未就绪"
+            if !buttons.isSeized {
+                buttons.stop()
+                buttons.start(seize: true, allowActions: false)
+            }
+            inputLock.unlock()
+            onStatusChange?()
             return
         }
-        showHUD("已发送 Fn，观察微信输入法", sticky: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            self?.fnTrigger.release()
-            self?.showHUD("Fn 已释放")
+
+        // The system-level Fn mapping only works when we do not seize the HID
+        // interface. Ordinary buttons are mapped to 0 by VoiceKeyMapper, so
+        // MiVoice can still handle them without native double actions.
+        if buttons.isSeized {
+            buttons.stop()
         }
+        if !buttons.isActionsEnabled {
+            buttons.stop()
+            buttons.start(seize: false, allowActions: true)
+        }
+
+        if !voiceKeyMapper.isFnMappingApplied() {
+            if !voiceKeyMapper.applyFnMapping() {
+                fnMappingStatus = voiceKeyMapper.error ?? "Fn 映射失败"
+                if voiceKeyMapper.hasTargets {
+                    // Mapping failed while the remote is present: fall back to
+                    // seize so keys do not double-trigger, but IME won't work.
+                    buttons.stop()
+                    buttons.start(seize: true, allowActions: false)
+                    showHUD("Fn 映射失败：\(fnMappingStatus)")
+                }
+                onStatusChange?()
+                return
+            }
+        }
+        fnMappingStatus = "已映射 F5 → Fn"
+        if settings.lockSystemInput {
+            _ = inputLock.lock(to: virtualMic.deviceUID)
+        } else {
+            inputLock.unlock()
+        }
+        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+        onStatusChange?()
+    }
+
+    func reapplyVoiceMapping() {
+        voiceKeyMapper.restore()
+        applyVoiceModeConfiguration()
+    }
+
+    func testVirtualMic() {
+        if !virtualMic.isReady {
+            refreshAudioDevices()
+            configureVirtualMic()
+        }
+        guard virtualMic.isReady else {
+            showHUD(virtualMicStatus)
+            return
+        }
+        virtualMic.playTestTone()
+        showHUD("已向虚拟麦克风播放测试音")
     }
 
     func openSoundSettings() {
@@ -331,7 +404,7 @@ final class AppModel: NSObject, ObservableObject {
 
     func retryButtons() {
         buttons.stop()
-        buttons.start()
+        applyVoiceModeConfiguration()
     }
 
     func reconnectRemote() {
@@ -350,13 +423,6 @@ final class AppModel: NSObject, ObservableObject {
             showHUD("遥控器未连接")
             return
         }
-        // A very fast second press while the previous IME session is draining
-        // must release the old Fn before starting a new one.
-        if fnTrigger.isHeld {
-            fnTrigger.release()
-            inputLock.unlock()
-        }
-
         var mode = resolvedVoiceMode
         if mode == .wechatIME || settings.voiceMode == .automatic {
             if !virtualMic.isReady {
@@ -378,27 +444,27 @@ final class AppModel: NSObject, ObservableObject {
             return
         }
 
+        // The remote's F5 is mapped to Fn at the HID level, so macOS and the
+        // input method receive a real Fn hold. Do not synthesize a second Fn.
+        if !voiceKeyMapper.isFnMappingApplied() {
+            applyVoiceModeConfiguration()
+        }
+        guard voiceKeyMapper.isFnMappingApplied() else {
+            showHUD("Fn 映射未生效：\(fnMappingStatus)")
+            return
+        }
+
         voiceSessionActive = true
         isRecording = true
         activeVoiceMode = .wechatIME
-        imeGeneration &+= 1
         _ = link.sendMicrophoneOpen()
 
         if settings.lockSystemInput {
             _ = inputLock.lock(to: virtualMic.deviceUID)
             defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
         }
+        sessionPeak = 0
         virtualMic.beginSession()
-
-        guard fnTrigger.press() else {
-            virtualMic.stop()
-            inputLock.unlock()
-            voiceSessionActive = false
-            isRecording = false
-            activeVoiceMode = .appleSpeech
-            showHUD(fnTrigger.lastError ?? "无法触发微信输入法")
-            return
-        }
         showHUD("正在听（微信输入法）…", detail: "实时文字由微信输入法显示在输入框", sticky: true)
         onStatusChange?()
     }
@@ -429,8 +495,14 @@ final class AppModel: NSObject, ObservableObject {
 
         switch activeVoiceMode {
         case .wechatIME:
-            showHUD("微信输入法识别中…", sticky: true)
-            finishIMEWhenDrained()
+            // The physical Fn-up already stopped the input method when the
+            // remote key was released; just let any queued audio finish.
+            activeVoiceMode = .appleSpeech
+            if sessionPeak < 0.003 {
+                showHUD("没有收到遥控器音频", detail: "电平条应跳动；不动就重连遥控器或检查麦克风")
+            } else {
+                showHUD("已交给微信输入法")
+            }
         case .appleSpeech, .automatic:
             if speechState == .listening {
                 speech.finish()
@@ -444,32 +516,6 @@ final class AppModel: NSObject, ObservableObject {
             }
             activeVoiceMode = .appleSpeech
         }
-        onStatusChange?()
-    }
-
-    private func finishIMEWhenDrained() {
-        let token = imeGeneration
-        let finish: () -> Void = { [weak self] in
-            guard let self else { return }
-            self.finishIME(token: token)
-        }
-        imeReleaseWork?.cancel()
-        let work = DispatchWorkItem(block: finish)
-        imeReleaseWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
-        virtualMic.whenDrained(finish)
-    }
-
-    private func finishIME(token: UInt64) {
-        guard token == imeGeneration, activeVoiceMode == .wechatIME else { return }
-        imeReleaseWork?.cancel()
-        imeReleaseWork = nil
-        virtualMic.cancelDrain()
-        fnTrigger.release()
-        if settings.lockSystemInput { inputLock.unlock() }
-        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
-        activeVoiceMode = .appleSpeech
-        showHUD("已交给微信输入法")
         onStatusChange?()
     }
 
@@ -535,6 +581,7 @@ final class AppModel: NSObject, ObservableObject {
             "语音方式：\(settings.voiceMode.title)（当前：\(resolvedVoiceMode.title)）",
             "虚拟麦克风：\(virtualMicStatus)",
             "系统输入：\(defaultInputName ?? "未知")",
+            "Fn 映射：\(fnMappingStatus)",
             "Apple 识别：\(speechDiagnostics)",
             "辅助功能：\(accessibilityGranted ? "已授权" : "未授权")",
             "输入监控：\(inputMonitoringGranted ? "已授权" : "未授权")",
@@ -560,6 +607,7 @@ extension AppModel: RemoteLinkDelegate {
     func remoteLink(_ link: RemoteLink, didDecode samples: [Int16]) {
         if activeVoiceMode == .wechatIME {
             virtualMic.enqueue(samples)
+            sessionPeak = max(sessionPeak, virtualMic.level)
         } else {
             speech.append(samples)
         }
@@ -571,7 +619,8 @@ extension AppModel: RemoteLinkDelegate {
 
     func remoteLink(_ link: RemoteLink, didFail message: String) {
         if activeVoiceMode == .wechatIME {
-            finishIME(token: imeGeneration)
+            activeVoiceMode = .appleSpeech
+            virtualMic.cancelDrain()
         } else if voiceSessionActive {
             speech.finish()
         }
@@ -604,8 +653,16 @@ extension AppModel: RemoteButtonsDelegate {
 
     func remoteButtons(_ buttons: RemoteButtons, didChange mode: RemoteButtons.Mode) {
         hidMode = mode
-        if case .ready(seized: false, devices: let devices) = mode, devices > 0 {
-            showHUD("未能独占遥控器：自定义按键已停用")
+        if case .ready(let seized, let actions, let devices) = mode {
+            if !seized && !actions && devices > 0 {
+                showHUD("未能独占遥控器：自定义按键已停用")
+            }
+            if devices > 0, !seized, resolvedVoiceMode == .wechatIME,
+               !voiceKeyMapper.isFnMappingApplied() {
+                DispatchQueue.main.async { [weak self] in
+                    self?.applyVoiceModeConfiguration()
+                }
+            }
         }
         onStatusChange?()
     }
