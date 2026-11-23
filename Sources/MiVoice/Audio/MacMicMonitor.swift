@@ -13,6 +13,9 @@ final class MacMicMonitor {
     private(set) var error: String?
     private(set) var deviceName = ""
     var onLevel: ((Float) -> Void)?
+    var onError: ((String) -> Void)?
+    private var receivedBuffer = false
+    private var generation = 0
 
     var authorizationStatus: AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .audio)
@@ -25,6 +28,8 @@ final class MacMicMonitor {
     @discardableResult
     func start() -> Bool {
         stop()
+        generation += 1
+        let currentGeneration = generation
         guard authorizationStatus == .authorized else {
             error = "未授权麦克风"
             return false
@@ -59,21 +64,30 @@ final class MacMicMonitor {
             return false
         }
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self,
-                  let channel = buffer.floatChannelData?[0] else { return }
-            let count = Int(buffer.frameLength)
-            guard count > 0 else { return }
-            var sum: Float = 0
-            for index in 0 ..< count {
-                let value = channel[index]
-                sum += value * value
+            guard let self, let channels = buffer.floatChannelData else { return }
+            let frameCount = Int(buffer.frameLength)
+            let channelCount = Int(buffer.format.channelCount)
+            guard frameCount > 0, channelCount > 0 else { return }
+            // Average every channel; some devices leave channel 0 silent.
+            var sum: Double = 0
+            var sampleCount = 0
+            for channel in 0 ..< channelCount {
+                let data = channels[channel]
+                for index in 0 ..< frameCount {
+                    let value = Double(data[index])
+                    sum += value * value
+                }
+                sampleCount += frameCount
             }
-            let rms = Float(sqrt(Double(sum) / Double(count)))
+            guard sampleCount > 0 else { return }
+            self.receivedBuffer = true
+            let rms = Float(sqrt(sum / Double(sampleCount)))
             DispatchQueue.main.async {
                 self.onLevel?(rms)
             }
         }
         tapInstalled = true
+        receivedBuffer = false
         do {
             engine.prepare()
             try engine.start()
@@ -101,6 +115,11 @@ final class MacMicMonitor {
             deviceName = device.name
             error = nil
             isRunning = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.generation == currentGeneration,
+                      self.isRunning, !self.receivedBuffer else { return }
+                self.onError?("没有收到内建麦克风数据")
+            }
             return true
         } catch {
             engine.inputNode.removeTap(onBus: 0)
@@ -112,6 +131,7 @@ final class MacMicMonitor {
     }
 
     func stop() {
+        generation += 1
         if tapInstalled {
             engine?.inputNode.removeTap(onBus: 0)
             tapInstalled = false

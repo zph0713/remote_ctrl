@@ -80,6 +80,7 @@ final class AppModel: NSObject, ObservableObject {
         speech.onStateChange = { [weak self] state in self?.speechState = state }
         virtualMic.onLevel = { [weak self] value in self?.virtualMicLevel = value }
         macMicMonitor.onLevel = { [weak self] value in self?.macMicLevel = value }
+        macMicMonitor.onError = { [weak self] message in self?.macMicStatus = message }
 
         refreshDiagnostics()
         SpeechEngine.requestAuthorization { [weak self] status in
@@ -137,6 +138,21 @@ final class AppModel: NSObject, ObservableObject {
             self,
             selector: #selector(sessionDidBecomeActive(_:)),
             name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
+        // NSWorkspace session notifications cover lock/unlock on current macOS;
+        // the distributed pair is a fallback for display-on lock transitions.
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(
+            self,
+            selector: #selector(screenIsLocked(_:)),
+            name: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil
+        )
+        distributed.addObserver(
+            self,
+            selector: #selector(screenIsUnlocked(_:)),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"),
             object: nil
         )
     }
@@ -204,6 +220,20 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    @objc private func screenIsLocked(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.sessionLocked = true
+            self?.updateSuspension()
+        }
+    }
+
+    @objc private func screenIsUnlocked(_ notification: Notification) {
+        onMain { [weak self] in
+            self?.sessionLocked = false
+            self?.updateSuspension()
+        }
+    }
+
     private func onMain(_ block: @escaping () -> Void) {
         if Thread.isMainThread {
             block()
@@ -235,7 +265,13 @@ final class AppModel: NSObject, ObservableObject {
         link.stop()
         buttons.stop()
         voiceKeyMapper.restore()
-        inputLock.unlock()
+        // Keep the loopback as the default input in IME mode: an input method
+        // can cache its device, and restoring it here would make the IME record
+        // from the built-in mic after unlock. Quitting or switching to Apple
+        // mode still restores the previous input.
+        if settings.voiceMode == .appleSpeech {
+            inputLock.unlock()
+        }
         macMicMonitor.stop()
         macMicLevel = 0
         macMicStatus = "已暂停（屏幕锁定/休眠）"
@@ -481,6 +517,7 @@ final class AppModel: NSObject, ObservableObject {
             return
         }
         macMicMonitor.onLevel = { [weak self] value in self?.macMicLevel = value }
+        macMicMonitor.onError = { [weak self] message in self?.macMicStatus = message }
         switch macMicMonitor.authorizationStatus {
         case .authorized:
             if macMicMonitor.start() {

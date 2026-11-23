@@ -13,7 +13,9 @@ final class SystemInputLock {
     @discardableResult
     func lock(to uid: String) -> Bool {
         guard !uid.isEmpty else { return false }
-        if targetUID == uid { return true }
+        if targetUID == uid, CoreAudioDeviceCatalog.defaultInputDeviceUID() == uid {
+            return true
+        }
         if targetUID == nil {
             previousUID = CoreAudioDeviceCatalog.defaultInputDeviceUID()
         }
