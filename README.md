@@ -57,6 +57,13 @@ CODESIGN_IDENTITY="Apple Development: 你的名字 (TEAMID)" INSTALL=1 ./scripts
 > 应用没有做 Apple 公证。如果通过网络/网盘传到 Mac 后被 Gatekeeper 拦住，执行
 > `xattr -dr com.apple.quarantine ~/Applications/MiVoice.app`。
 
+## 从 SayAll 迁移
+
+1. 菜单栏彻底退出 SayAll（不是只关窗口），并在“系统设置 → 通用 → 登录项”里移除它。
+2. 不需要卸载它的虚拟声卡；MiVoice 不使用它。想彻底清理可以运行 SayAll 的卸载 PKG。
+3. 确认没有 Karabiner 等其它软件占用遥控器按键。
+4. 再启动 MiVoice。两个程序同时运行时，BLE 连接和 HID 独占会互相抢。
+
 ## 首次启动
 
 应用是菜单栏图标（没有 Dock 图标）。首次启动会自动打开设置窗口，按顺序授权：
