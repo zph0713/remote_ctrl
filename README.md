@@ -1,5 +1,7 @@
 # MiVoice
 
+![build](https://github.com/zph0713/remote_ctrl/actions/workflows/build.yml/badge.svg)
+
 把小米蓝牙遥控器 2 Pro（RC003）变成 MacBook Pro 的本地语音输入设备，只保留两件事：
 
 1. **按住语音键说话，松开后文字粘贴到当前应用**

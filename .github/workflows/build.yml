@@ -33,3 +33,15 @@ jobs:
       - name: Audit network APIs
         if: success()
         run: ./scripts/audit.sh
+
+      - name: Package app
+        if: success()
+        run: INSTALL=0 ./scripts/build-app.sh
+
+      - name: Upload app
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiVoice-app
+          path: dist/MiVoice.app
+          if-no-files-found: error
