@@ -88,6 +88,23 @@ final class VoiceKeyMapper {
         apply(destinations: desiredMappings)
     }
 
+    /// Removes mappings for keys this app owns, even if a previous run crashed
+    /// before it could restore them. Other keys and other tools' mappings are
+    /// left untouched.
+    @discardableResult
+    func resetKnownMappings() -> Bool {
+        var failed = false
+        for service in targets() {
+            let current = read(service)
+            let desired = current.filter { !Self.desiredSources.contains($0.source) }
+            if !update(current: current, desired: desired, service: service) {
+                failed = true
+            }
+        }
+        snapshots.removeAll()
+        return !failed
+    }
+
     private func apply(destinations: [UInt64: UInt64]) -> Bool {
         let services = targets()
         guard !services.isEmpty else {
@@ -109,8 +126,10 @@ final class VoiceKeyMapper {
                     return false
                 }
                 if snapshots[id]?[source] == nil {
+                    // If the key is already at our target value, it is a
+                    // leftover from a previous run, not a user mapping.
                     snapshots[id, default: [:]][source] = Snapshot(
-                        original: existing,
+                        original: existing == destination ? nil : existing,
                         installed: destination
                     )
                 }

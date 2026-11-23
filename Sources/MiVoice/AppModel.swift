@@ -73,6 +73,8 @@ final class AppModel: NSObject, ObservableObject {
             self?.onStatusChange?()
         }
 
+        // Remove mappings left behind by a crash before installing new ones.
+        voiceKeyMapper.resetKnownMappings()
         link.start()
         refreshPermissions()
         refreshAudioDevices()
@@ -289,6 +291,11 @@ final class AppModel: NSObject, ObservableObject {
         if !buttons.isActionsEnabled {
             buttons.stop()
             buttons.start(seize: false, allowActions: true)
+            if case .failed(let message) = buttons.mode {
+                fnMappingStatus = message
+                onStatusChange?()
+                return
+            }
         }
 
         if !voiceKeyMapper.isFnMappingApplied() {
