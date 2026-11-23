@@ -90,6 +90,10 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func systemDidWake() {
+        if !buttons.mode.isSeized {
+            buttons.stop()
+            buttons.start()
+        }
         if case .ready = linkState { return }
         link.reconnectNow()
     }
@@ -345,6 +349,9 @@ extension AppModel: RemoteButtonsDelegate {
 
     func remoteButtons(_ buttons: RemoteButtons, didChange mode: RemoteButtons.Mode) {
         hidMode = mode
+        if case .ready(seized: false, devices: let devices) = mode, devices > 0 {
+            showHUD("未能独占遥控器：自定义按键已停用")
+        }
         onStatusChange?()
     }
 
