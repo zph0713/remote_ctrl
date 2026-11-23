@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         addDisabled(menu, model.linkState.text)
         addDisabled(menu, "按键：\(model.hidMode.text)")
-        addDisabled(menu, "语音识别：\(SpeechEngine.authorizationText())")
+        addDisabled(menu, "语音：\(model.voiceStatusText)")
         menu.addItem(.separator())
 
         add(menu, "打开设置…", #selector(showSettings), ",")

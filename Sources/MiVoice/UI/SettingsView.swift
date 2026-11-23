@@ -13,6 +13,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 statusCard
+                voiceModeCard
                 speechCard
                 buttonsCard
                 permissionsCard
@@ -86,6 +87,74 @@ struct SettingsView: View {
             statusRow("语音", value: speechStateText) {
                 EmptyView()
             }
+        }
+    }
+
+    private var voiceModeCard: some View {
+        card("语音方式") {
+            HStack {
+                Text("识别方式").frame(width: 96, alignment: .leading)
+                Picker("", selection: Binding(
+                    get: { model.settings.voiceMode },
+                    set: { model.setVoiceMode($0) }
+                )) {
+                    ForEach(VoiceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 330)
+                Spacer()
+            }
+            Text(model.settings.voiceMode.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("虚拟麦克风").frame(width: 96, alignment: .leading)
+                Picker("", selection: Binding(
+                    get: { model.settings.virtualDeviceUID },
+                    set: { model.setVirtualDevice($0) }
+                )) {
+                    if model.loopbackDevices.isEmpty {
+                        Text("未找到（安装 BlackHole 2ch）").tag("")
+                    }
+                    ForEach(model.loopbackDevices) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 250)
+                Button("刷新") {
+                    model.refreshAudioDevices()
+                    model.configureVirtualMic()
+                }
+                Spacer()
+            }
+
+            Toggle("语音时自动切换系统输入到虚拟麦克风", isOn: Binding(
+                get: { model.settings.lockSystemInput },
+                set: { model.setLockSystemInput($0) }
+            ))
+            Text("虚拟麦克风：\(model.virtualMicStatus)　系统输入：\(model.defaultInputName ?? "未知")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("测试 Fn 触发") { model.testIMETrigger() }
+                Button("打开声音设置") { model.openSoundSettings() }
+                Spacer()
+            }
+
+            Text("微信输入法 2.0+ 默认按住 Fn 说话。选“微信输入法”后，MiVoice 会把遥控器语音键变成 Fn，并把 16 kHz 音频写进上面的虚拟麦克风。请先安装 BlackHole 2ch（或使用 SayAll 的 MiRemoteV 2ch）。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Text("隐私提示：Apple 离线模式不上传音频；微信输入法会按它自己的隐私政策处理语音，MiVoice 本身不联网。")
+                .font(.caption)
+                .foregroundColor(.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -136,6 +136,30 @@ public enum PresetAction: String, CaseIterable, Codable, Hashable, Identifiable,
     }
 }
 
+public enum VoiceMode: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case appleSpeech
+    case wechatIME
+    case automatic
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .appleSpeech: return "Apple 离线识别（直接粘贴）"
+        case .wechatIME: return "微信输入法（虚拟麦克风）"
+        case .automatic: return "自动（有虚拟麦克风就用微信输入法）"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .appleSpeech: return "音频只在本机识别，文字由 MiVoice 粘贴"
+        case .wechatIME: return "音频送进虚拟麦克风，由微信输入法识别并上屏"
+        case .automatic: return "找到 BlackHole / MiRemoteV 时优先微信输入法"
+        }
+    }
+}
+
 public struct ButtonBinding: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
         case none
@@ -216,19 +240,28 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var launchAtLogin: Bool
     public var showHUD: Bool
     public var restoreClipboard: Bool
+    public var voiceMode: VoiceMode
+    public var virtualDeviceUID: String
+    public var lockSystemInput: Bool
 
     public init(
         localeIdentifier: String = "zh-CN",
         bindings: [String: ButtonBinding] = AppSettings.defaultBindings,
         launchAtLogin: Bool = false,
         showHUD: Bool = true,
-        restoreClipboard: Bool = true
+        restoreClipboard: Bool = true,
+        voiceMode: VoiceMode = .appleSpeech,
+        virtualDeviceUID: String = "",
+        lockSystemInput: Bool = true
     ) {
         self.localeIdentifier = localeIdentifier
         self.bindings = bindings
         self.launchAtLogin = launchAtLogin
         self.showHUD = showHUD
         self.restoreClipboard = restoreClipboard
+        self.voiceMode = voiceMode
+        self.virtualDeviceUID = virtualDeviceUID
+        self.lockSystemInput = lockSystemInput
     }
 
     public func binding(for button: RemoteButton) -> ButtonBinding {
@@ -258,6 +291,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case localeIdentifier, bindings, launchAtLogin, showHUD, restoreClipboard
+        case voiceMode, virtualDeviceUID, lockSystemInput
     }
 
     public init(from decoder: Decoder) throws {
@@ -272,5 +306,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         showHUD = try container.decodeIfPresent(Bool.self, forKey: .showHUD) ?? true
         restoreClipboard = try container.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? true
+        if let rawVoiceMode = try container.decodeIfPresent(String.self, forKey: .voiceMode) {
+            voiceMode = VoiceMode(rawValue: rawVoiceMode) ?? .appleSpeech
+        } else {
+            voiceMode = .appleSpeech
+        }
+        virtualDeviceUID = try container.decodeIfPresent(String.self, forKey: .virtualDeviceUID) ?? ""
+        lockSystemInput = try container.decodeIfPresent(Bool.self, forKey: .lockSystemInput) ?? true
     }
 }

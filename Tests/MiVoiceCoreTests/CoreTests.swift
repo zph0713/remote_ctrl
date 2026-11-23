@@ -145,6 +145,25 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.showHUD, true)
     }
 
+    func testVoiceModeDefaultsToLocalApple() {
+        let settings = AppSettings()
+        XCTAssertEqual(settings.voiceMode, .appleSpeech)
+        XCTAssertEqual(settings.virtualDeviceUID, "")
+        XCTAssertEqual(settings.lockSystemInput, true)
+    }
+
+    func testVoiceModeSurvivesRoundTrip() throws {
+        var settings = AppSettings()
+        settings.voiceMode = .wechatIME
+        settings.virtualDeviceUID = "BlackHole2ch_UID"
+        settings.lockSystemInput = false
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertEqual(decoded.voiceMode, .wechatIME)
+        XCTAssertEqual(decoded.virtualDeviceUID, "BlackHole2ch_UID")
+        XCTAssertEqual(decoded.lockSystemInput, false)
+    }
+
     func testUnknownBindingKindFallsBackToNone() throws {
         let json = Data(#"{"kind":"fromTheFuture"}"#.utf8)
         let decoded = try JSONDecoder().decode(ButtonBinding.self, from: json)
