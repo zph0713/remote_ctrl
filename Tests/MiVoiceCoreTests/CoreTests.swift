@@ -23,6 +23,14 @@ final class ATVVTests: XCTestCase {
         XCTAssertEqual(ATVVCapabilities.parse(data)?.frameSize, 120)
     }
 
+    func testCapabilitiesMirrorsCodecIntoInteractionByte() {
+        let data = Data([0x0B, 0x01, 0x00, 0x00, 0x02, 0x00, 0x78, 0x00, 0x00])
+        let caps = ATVVCapabilities.parse(data)
+        XCTAssertEqual(caps?.selectedCodec, 0x02)
+        XCTAssertEqual(caps?.interaction, 0x03)
+        XCTAssertEqual(caps?.sampleRate, 16_000)
+    }
+
     func testOldFirmwareLayout() {
         // version 0x0010, eight-byte body with codec at index 4 and frame at 7...8
         let data = Data([0x0B, 0x00, 0x10, 0x00, 0x02, 0x00, 0x00, 0x00, 0x78])
@@ -37,6 +45,13 @@ final class ATVVTests: XCTestCase {
         let samples = decoder.decode(Data([0x00, 0x00, 0x00, 0x00]))
         XCTAssertEqual(samples.count, 8)
         XCTAssertEqual(samples, [Int16](repeating: 0, count: 8))
+    }
+
+    func testDecoderMatchesKnownRC003Vectors() {
+        let decoder = IMAADPCMDecoder()
+        XCTAssertEqual(decoder.decode(Data([0x11])), [1, 2])
+        decoder.reset()
+        XCTAssertEqual(decoder.decode(Data([0x7F])), [11, -19])
     }
 
     func testDecoderNeverOverflowsInt16() {
@@ -74,7 +89,9 @@ final class ATVVTests: XCTestCase {
 
     func testMicrophoneCommands() {
         XCTAssertEqual(ATVVProtocol.microphoneOpen(version: 0x0100, codec: 0x02), Data([0x0C, 0x00]))
+        XCTAssertEqual(ATVVProtocol.microphoneOpen(version: 0x0001, codec: 0x02), Data([0x0C, 0x00, 0x02]))
         XCTAssertEqual(ATVVProtocol.microphoneClose(version: 0x0100, sessionID: 7), Data([0x0D, 0x07]))
+        XCTAssertEqual(ATVVProtocol.microphoneClose(version: 0x0001, sessionID: 7), Data([0x0D]))
     }
 }
 
