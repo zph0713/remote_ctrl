@@ -6,7 +6,9 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel
+    env:
+      ARCHS: "arm64 x86_64"
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
@@ -15,7 +17,7 @@ jobs:
       - name: Build app
         run: |
           set -o pipefail
-          swift build -c release --product MiVoice 2>&1 | tee build.log
+          swift build -c release --product MiVoice --arch arm64 --arch x86_64 2>&1 | tee build.log
 
       - name: Publish build errors
         if: failure()

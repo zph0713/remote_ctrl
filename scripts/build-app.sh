@@ -16,10 +16,15 @@ if ! command -v swift >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> Building ($CONFIG)"
-swift build -c "$CONFIG" --product MiVoice
+ARCH_ARGS=""
+for arch in ${ARCHS:-}; do
+  ARCH_ARGS="$ARCH_ARGS --arch $arch"
+done
 
-BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+echo "==> Building ($CONFIG ${ARCHS:-native})"
+swift build -c "$CONFIG" --product MiVoice $ARCH_ARGS
+
+BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path $ARCH_ARGS)"
 BIN="$BIN_DIR/MiVoice"
 if [ ! -x "$BIN" ]; then
   echo "Build output missing: $BIN" >&2
