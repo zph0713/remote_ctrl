@@ -13,6 +13,10 @@ var targets: [Target] = [
     ),
 ]
 
+var products: [Product] = [
+    .library(name: "MiVoiceCore", targets: ["MiVoiceCore"]),
+]
+
 #if os(macOS)
 targets.append(
     .executableTarget(
@@ -21,17 +25,12 @@ targets.append(
         path: "Sources/MiVoice"
     )
 )
+products.append(.executable(name: "MiVoice", targets: ["MiVoice"]))
 #endif
 
-var package = Package(
+let package = Package(
     name: "MiVoice",
     platforms: [.macOS(.v14)],
-    products: [
-        .library(name: "MiVoiceCore", targets: ["MiVoiceCore"]),
-    ],
+    products: products,
     targets: targets
 )
-
-#if os(macOS)
-package.products.append(.executable(name: "MiVoice", targets: ["MiVoice"]))
-#endif
