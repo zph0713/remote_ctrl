@@ -53,7 +53,7 @@ final class VoiceKeyMapper {
     static let fnDestination: UInt64 = 0x0000_00FF_0000_0003
 
     private static var desiredSources: Set<UInt64> {
-        var result = Set(RemoteButton.allCases.map { keyboardUsage($0.hidUsage) })
+        var result = Set(RemoteButton.allCases.map { Self.keyboardUsage($0.hidUsage) })
         result.insert(voiceSource)
         result.insert(secondaryVoiceSource)
         return result
