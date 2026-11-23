@@ -45,6 +45,12 @@ open ~/Applications/MiVoice.app
 ./scripts/build-app.sh     # 产物在 dist/MiVoice.app
 ```
 
+GitHub Actions 每次 push 会在 macOS 15 上构建、跑测试、执行联网审计，并上传 `MiVoice-app` 产物：仓库 **Actions → 最新 build → Artifacts**。产物是 ad-hoc 签名，下载后如被 Gatekeeper 拦截：
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/MiVoice.app
+```
+
 签名：
 
 - 默认 ad-hoc 签名（`-`），本机使用足够。
