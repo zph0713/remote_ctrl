@@ -21,6 +21,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var defaultInputName: String?
     @Published private(set) var virtualMicStatus = ""
     @Published private(set) var activeVoiceMode: VoiceMode = .appleSpeech
+    @Published private(set) var partialTranscript = ""
     @Published var recordingButton: RemoteButton?
 
     var onStatusChange: (() -> Void)?
@@ -58,6 +59,7 @@ final class AppModel: NSObject, ObservableObject {
         link.delegate = self
         buttons.delegate = self
         speech.onFinal = { [weak self] text in self?.handleFinalText(text) }
+        speech.onPartial = { [weak self] text in self?.handlePartial(text) }
         speech.onError = { [weak self] message in self?.handleSpeechError(message) }
         speech.onStateChange = { [weak self] state in self?.speechState = state }
 
@@ -397,7 +399,7 @@ final class AppModel: NSObject, ObservableObject {
             showHUD(fnTrigger.lastError ?? "无法触发微信输入法")
             return
         }
-        showHUD("正在听（微信输入法）…", sticky: true)
+        showHUD("正在听（微信输入法）…", detail: "实时文字由微信输入法显示在输入框", sticky: true)
         onStatusChange?()
     }
 
@@ -405,6 +407,7 @@ final class AppModel: NSObject, ObservableObject {
         voiceSessionActive = true
         isRecording = true
         activeVoiceMode = .appleSpeech
+        partialTranscript = ""
         _ = link.sendMicrophoneOpen()
 
         if speech.start(localeIdentifier: settings.localeIdentifier) {
@@ -431,7 +434,11 @@ final class AppModel: NSObject, ObservableObject {
         case .appleSpeech, .automatic:
             if speechState == .listening {
                 speech.finish()
-                showHUD("识别中…", sticky: true)
+                showHUD(
+                    "识别中…",
+                    detail: partialTranscript.isEmpty ? nil : transcriptTail(partialTranscript),
+                    sticky: true
+                )
             } else {
                 hud.hide()
             }
@@ -467,6 +474,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     private func handleFinalText(_ text: String) {
+        partialTranscript = ""
         let result = KeyInjector.insertText(text, restoreClipboard: settings.restoreClipboard)
         switch result {
         case .pasted:
@@ -483,17 +491,35 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     private func handleSpeechError(_ message: String) {
+        partialTranscript = ""
         showHUD(message)
         lastError(message)
+    }
+
+    private func handlePartial(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        partialTranscript = trimmed
+        guard activeVoiceMode == .appleSpeech, isRecording else { return }
+        guard !trimmed.isEmpty else {
+            showHUD("正在听…", sticky: true)
+            return
+        }
+        showHUD("正在听…", detail: transcriptTail(trimmed), sticky: true)
+    }
+
+    private func transcriptTail(_ text: String) -> String {
+        let limit = 180
+        guard text.count > limit else { return text }
+        return "…" + String(text.suffix(limit))
     }
 
     private func lastError(_ message: String) {
         Log.error("app error: \(message)")
     }
 
-    private func showHUD(_ message: String, sticky: Bool = false) {
+    private func showHUD(_ message: String, detail: String? = nil, sticky: Bool = false) {
         guard settings.showHUD else { return }
-        hud.show(message, sticky: sticky)
+        hud.show(message, detail: detail, sticky: sticky)
     }
 
     // MARK: - Diagnostics

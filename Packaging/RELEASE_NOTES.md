@@ -2,16 +2,23 @@
 
 把小米蓝牙遥控器 2 Pro（RC003）变成 Mac 的本地语音输入和自定义按键工具。
 
+## 本次更新（1.1.0）
+
+- Apple 离线模式说话时，悬浮提示会**实时显示已识别的文字**，不用等松开。
+- 新增微信输入法（虚拟麦克风）模式：音频写入 BlackHole 2ch / MiRemoteV 2ch，合成按住 Fn 触发微信输入法 2.0+ 语音输入。
+- 支持语音期间自动切换系统输入并在结束后恢复。
+- 新增“测试 Fn 触发”和虚拟麦克风设置。
+
 ## 下载
 
-- **MiVoice.app**：下载本页下方的 `MiVoice-v1.0.0.zip`
+- **MiVoice.app**：下载本页下方的 `MiVoice-<版本>.zip`（例如 `MiVoice-v1.1.0.zip`）
 - **源码**：GitHub 自动生成的 Source code 压缩包，或 `git clone https://github.com/zph0713/remote_ctrl.git`
 
 要求：Apple Silicon Mac（M1 及以上），macOS 14 或更高，遥控器已在系统设置 → 蓝牙中配对。
 
 ## 安装
 
-1. 解压 `MiVoice-v1.0.0.zip`。
+1. 解压下载到的 `MiVoice-<版本>.zip`。
 2. 把 `MiVoice.app` 拖进“应用程序”或 `~/Applications`。
 3. 首次打开如果被 Gatekeeper 拦截：
 

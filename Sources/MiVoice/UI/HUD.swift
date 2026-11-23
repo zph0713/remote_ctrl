@@ -1,14 +1,18 @@
 import AppKit
 
-/// A small non-activating HUD so the user gets feedback without focus changes.
+/// A non-activating HUD. It can show a title plus a live transcript preview
+/// while the user is speaking.
 final class HUD {
     private var panel: NSPanel?
     private var label: NSTextField?
     private var hideWork: DispatchWorkItem?
 
-    func show(_ text: String, sticky: Bool = false) {
+    func show(_ text: String, detail: String? = nil, sticky: Bool = false) {
         ensurePanel()
-        label?.stringValue = text
+        let detail = (detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let height: CGFloat = detail.isEmpty ? 60 : 118
+        panel?.setContentSize(NSSize(width: 520, height: height))
+        label?.attributedStringValue = attributed(text: text, detail: detail)
         position()
         panel?.orderFrontRegardless()
 
@@ -20,7 +24,7 @@ final class HUD {
             self?.hide()
         }
         hideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: work)
     }
 
     func hide() {
@@ -29,10 +33,33 @@ final class HUD {
         panel?.orderOut(nil)
     }
 
+    private func attributed(text: String, detail: String) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let titleFont = detail.isEmpty
+            ? NSFont.systemFont(ofSize: 15, weight: .medium)
+            : NSFont.systemFont(ofSize: 13, weight: .regular)
+        let titleColor = detail.isEmpty ? NSColor.labelColor : NSColor.secondaryLabelColor
+        result.append(NSAttributedString(
+            string: text,
+            attributes: [.font: titleFont, .foregroundColor: titleColor]
+        ))
+        if !detail.isEmpty {
+            result.append(NSAttributedString(string: "\n"))
+            result.append(NSAttributedString(
+                string: detail,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 15, weight: .medium),
+                    .foregroundColor: NSColor.labelColor,
+                ]
+            ))
+        }
+        return result
+    }
+
     private func ensurePanel() {
         guard panel == nil else { return }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 64),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 60),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -57,7 +84,10 @@ final class HUD {
         label.font = .systemFont(ofSize: 15, weight: .medium)
         label.textColor = .labelColor
         label.alignment = .center
-        label.lineBreakMode = .byTruncatingTail
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 4
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
         label.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(label)
         NSLayoutConstraint.activate([

@@ -21,6 +21,7 @@ final class SpeechEngine {
     }
 
     var onFinal: ((String) -> Void)?
+    var onPartial: ((String) -> Void)?
     var onError: ((String) -> Void)?
     var onStateChange: ((State) -> Void)?
 
@@ -185,7 +186,11 @@ final class SpeechEngine {
         if let result {
             let text = result.bestTranscription.formattedString
             if !text.isEmpty {
+                let previous = bestText
                 bestText = String(text.prefix(20_000))
+                if bestText != previous {
+                    onPartial?(bestText)
+                }
             }
             if result.isFinal {
                 deliver(bestText, session: session)
