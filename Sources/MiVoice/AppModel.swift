@@ -442,8 +442,9 @@ final class AppModel: NSObject, ObservableObject {
 
     private func finishIMEWhenDrained() {
         let token = imeGeneration
-        let finish = { [weak self] in
-            self?.finishIME(token: token)
+        let finish: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.finishIME(token: token)
         }
         imeReleaseWork?.cancel()
         let work = DispatchWorkItem(block: finish)
