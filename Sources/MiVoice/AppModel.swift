@@ -65,7 +65,7 @@ final class AppModel: NSObject, ObservableObject {
         link.delegate = self
         buttons.delegate = self
         buttons.gestureConfiguration = { [weak self] button in
-            guard let self else { return (false, false) }
+            guard let self else { return (double: false, long: false) }
             let gestures = self.settings.gestures(for: button)
             return (gestures.hasDouble, gestures.hasLong)
         }

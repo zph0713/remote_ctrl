@@ -223,7 +223,7 @@ final class RemoteButtons {
     }
 
     private func handleGesture(_ phase: RemoteButtonPhase, button: RemoteButton) {
-        let options = gestureConfiguration?(button) ?? (false, false)
+        let options = gestureConfiguration?(button) ?? (double: false, long: false)
         let commands = gestures.handle(
             phase,
             button: button,
