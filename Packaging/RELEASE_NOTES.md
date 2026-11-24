@@ -2,10 +2,11 @@
 
 把小米蓝牙遥控器 2 Pro（RC003）变成 Mac 的本地语音输入和自定义按键工具。
 
-## 本次更新（1.3.0）
+## 本次更新（1.3.1）
 
 - 新增文件日志 `~/Library/Logs/MiVoice/MiVoice.log`（2 MB 轮转，保留 4 份），记录休眠/唤醒、BLE、HID、Fn 映射、音频设备每一步。
 - 新增主线程看门狗：主线程超过 4 秒不响应时写入 `WATCHDOG main thread stalled ... lastStep=...`。
+- 日志记录每次锁屏/显示器/会话通知、挂起状态变化，以及 60 秒一次的心跳，便于判断通知是否送达、卡在哪一步。
 - 设置和菜单新增“导出诊断日志…”，在桌面生成 zip（含日志、系统信息和最近崩溃报告）。“打开日志文件夹”可直接查看。
 - 日志不记录音频、识别文字或剪贴板内容；包含设备名、权限状态、步骤耗时和错误。
 - 唤醒后等待 1.5 秒再恢复音频/BLE/HID，减少解锁瞬间的争抢。
@@ -24,7 +25,7 @@
 
 ## 下载
 
-- **MiVoice.app**：下载本页下方的 `MiVoice-<版本>.zip`（例如 `MiVoice-v1.3.0.zip`）
+- **MiVoice.app**：下载本页下方的 `MiVoice-<版本>.zip`（例如 `MiVoice-v1.3.1.zip`）
 - **源码**：GitHub 自动生成的 Source code 压缩包，或 `git clone https://github.com/zph0713/remote_ctrl.git`
 
 要求：Apple Silicon Mac（M1 及以上），macOS 14 或更高，遥控器已在系统设置 → 蓝牙中配对。

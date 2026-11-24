@@ -24,6 +24,7 @@ enum Log {
     private static var lastStep = "launch"
     private static var lastMainTick = Date()
     private static var stallReported = false
+    private static var heartbeatTicks = 0
     private static var watchdog: DispatchSourceTimer?
 
     static var directoryURL: URL {
@@ -157,7 +158,13 @@ enum Log {
         let timer = Timer(timeInterval: 1, repeats: true) { _ in
             stateLock.lock()
             lastMainTick = Date()
+            heartbeatTicks += 1
+            let tick = heartbeatTicks
+            let step = lastStep
             stateLock.unlock()
+            if tick % 60 == 0 {
+                write(level: .info, "HEARTBEAT step=\(step)")
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
 

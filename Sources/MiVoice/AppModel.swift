@@ -188,6 +188,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func workspaceWillSleep(_ notification: Notification) {
+        Log.info("workspace.event willSleep")
         onMain { [weak self] in
             self?.systemAsleep = true
             self?.updateSuspension()
@@ -195,6 +196,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func workspaceDidWake(_ notification: Notification) {
+        Log.info("workspace.event didWake")
         onMain { [weak self] in
             self?.systemAsleep = false
             self?.updateSuspension()
@@ -202,6 +204,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func screensDidSleep(_ notification: Notification) {
+        Log.info("workspace.event screensDidSleep")
         onMain { [weak self] in
             self?.screensAsleep = true
             self?.updateSuspension()
@@ -209,6 +212,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func screensDidWake(_ notification: Notification) {
+        Log.info("workspace.event screensDidWake")
         onMain { [weak self] in
             self?.screensAsleep = false
             self?.updateSuspension()
@@ -216,6 +220,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func sessionDidResignActive(_ notification: Notification) {
+        Log.info("workspace.event sessionDidResignActive")
         onMain { [weak self] in
             self?.sessionLocked = true
             self?.updateSuspension()
@@ -223,6 +228,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func sessionDidBecomeActive(_ notification: Notification) {
+        Log.info("workspace.event sessionDidBecomeActive")
         onMain { [weak self] in
             self?.sessionLocked = false
             self?.updateSuspension()
@@ -230,6 +236,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func screenIsLocked(_ notification: Notification) {
+        Log.info("workspace.event screenIsLocked")
         onMain { [weak self] in
             self?.sessionLocked = true
             self?.updateSuspension()
@@ -237,6 +244,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func screenIsUnlocked(_ notification: Notification) {
+        Log.info("workspace.event screenIsUnlocked")
         onMain { [weak self] in
             self?.sessionLocked = false
             self?.updateSuspension()
@@ -253,6 +261,10 @@ final class AppModel: NSObject, ObservableObject {
 
     private func updateSuspension() {
         let shouldSuspend = sessionLocked || screensAsleep || systemAsleep
+        Log.info(
+            "suspension.update lock=\(sessionLocked) screens=\(screensAsleep) " +
+                "system=\(systemAsleep) suspended=\(isSuspended) shouldSuspend=\(shouldSuspend)"
+        )
         if shouldSuspend {
             suspendForSleep()
         } else {
@@ -316,7 +328,10 @@ final class AppModel: NSObject, ObservableObject {
     /// short delay keeps unlock/login responsive instead of doing BLE, audio
     /// and HID work in the same run loop turn as the wake notification.
     private func resumeAfterSleep() {
-        guard isSuspended else { return }
+        guard isSuspended else {
+            Log.info("resume.skipped already_active")
+            return
+        }
         isSuspended = false
         Log.step("resume.scheduled delay_ms=1500")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

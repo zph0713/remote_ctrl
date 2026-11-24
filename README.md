@@ -36,7 +36,7 @@ MiVoice 不内置 HAL 音频驱动。驱动安装、CoreAudio 重启和版本冲
 
 ## 下载与安装（GitHub Release）
 
-1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.3.0.zip`。
+1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.3.1.zip`。
 2. 解压，把 `MiVoice.app` 拖进“应用程序”或 `~/Applications`。
 3. 首次打开如果被 Gatekeeper 拦截：
 
