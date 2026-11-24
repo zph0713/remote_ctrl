@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Log.start()
+        Log.step("app.didFinishLaunching")
         NSApp.setActivationPolicy(.accessory)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -38,8 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        Log.step("app.willTerminate")
         model.stopMacMicMonitor()
         model.stop()
+        Log.flush()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -62,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         add(menu, "打开设置…", #selector(showSettings), ",")
         add(menu, "重新连接遥控器", #selector(reconnectRemote), "")
         add(menu, "复制诊断信息", #selector(copyDiagnostics), "")
+        add(menu, "导出诊断日志…", #selector(exportDiagnostics), "")
+        add(menu, "打开日志文件夹", #selector(openLogFolder), "")
 
         if !model.accessibilityGranted || !model.inputMonitoringGranted {
             add(menu, "需要授予权限…", #selector(showSettings), "")
@@ -98,6 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func copyDiagnostics() {
         model.copyDiagnostics()
+    }
+
+    @objc private func exportDiagnostics() {
+        model.exportDiagnostics()
+    }
+
+    @objc private func openLogFolder() {
+        model.openLogFolder()
     }
 
     @objc private func quit() {

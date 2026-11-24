@@ -36,10 +36,12 @@ final class VirtualMicOutput {
     }
 
     func configure(uid: String) -> Bool {
+        Log.info("virtualMic.configure begin uid=\(uid)")
         stop()
         let devices = CoreAudioDeviceCatalog.loopbackDevices()
         guard let device = devices.first(where: { $0.uid == uid }) ?? devices.first else {
             error = "未找到虚拟麦克风，请安装 BlackHole 2ch"
+            Log.error("virtualMic.configure no_device")
             return false
         }
         guard let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
@@ -79,6 +81,7 @@ final class VirtualMicOutput {
             selectedDeviceID = device.id
             deviceUID = device.uid
             error = nil
+            Log.info("virtualMic.configure ready uid=\(device.uid) name=\(device.name)")
             return true
         } catch {
             self.error = "无法启动虚拟麦克风：\(error.localizedDescription)"
@@ -98,6 +101,7 @@ final class VirtualMicOutput {
               ),
               let channel = buffer.floatChannelData?[0] else {
             error = "虚拟麦克风缓冲已满，请重新连接"
+            Log.error("virtualMic.enqueue full queued=\(queuedFrames) incoming=\(samples.count)")
             return false
         }
         var sumSquares: Double = 0
@@ -129,6 +133,7 @@ final class VirtualMicOutput {
     }
 
     func beginSession() {
+        Log.info("virtualMic.beginSession")
         drainCompletion = nil
         generation &+= 1
         queuedFrames = 0
@@ -162,6 +167,7 @@ final class VirtualMicOutput {
     }
 
     func stop() {
+        Log.info("virtualMic.stop queued=\(queuedFrames)")
         drainCompletion = nil
         generation &+= 1
         player?.stop()

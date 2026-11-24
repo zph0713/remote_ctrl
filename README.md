@@ -36,7 +36,7 @@ MiVoice 不内置 HAL 音频驱动。驱动安装、CoreAudio 重启和版本冲
 
 ## 下载与安装（GitHub Release）
 
-1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.2.3.zip`。
+1. 打开 [Releases](https://github.com/zph0713/remote_ctrl/releases/latest)，下载 `MiVoice-v1.3.0.zip`。
 2. 解压，把 `MiVoice.app` 拖进“应用程序”或 `~/Applications`。
 3. 首次打开如果被 Gatekeeper 拦截：
 
@@ -219,8 +219,29 @@ sudo lsof -i -p "$(pgrep MiVoice)"    # 应没有任何网络连接
 - 连接 10 秒超时、语音通道初始化 8 秒超时、单次语音最长 60 秒；
 - 断线按 2/4/8/15 秒退避重连，唤醒后自动重连；
 - HID 报告做 30ms 去重，避免多接口重复触发；
-- 不修改系统 HID 映射、不安装驱动、不重启 CoreAudio、不创建事件 tap；
+- 只对遥控器自己的 HID 服务做设备级 `UserKeyMapping`（退出/锁屏时恢复），不安装驱动、不重启 CoreAudio、不创建全局事件 tap；
 - 权限缺失时**关闭相关功能并明确提示**，而不是带着半失效状态运行。
+
+## 诊断日志
+
+MiVoice 会把运行日志写到 `~/Library/Logs/MiVoice/MiVoice.log`（超过 2 MB 轮转，保留 4 份）。日志包含：
+
+- 应用版本、macOS 版本、CPU 架构、权限状态；
+- 休眠/锁屏/唤醒的每个步骤及耗时；
+- BLE 扫描/连接、HID 打开/独占、Fn 映射写入/恢复；
+- 虚拟麦克风、内建麦克风、系统输入切换的结果和错误；
+- 主线程看门狗：主线程超过 4 秒不响应时写入 `WATCHDOG main thread stalled ... lastStep=...`。
+
+**不记录**音频、识别出的文字或剪贴板内容。
+
+卡死或异常后：
+
+1. 强制退出 MiVoice（菜单栏 → 退出，或活动监视器）。
+2. 重新打开 MiVoice。
+3. 菜单栏 → **导出诊断日志…**，会在桌面生成 `MiVoice-Diagnostics-<时间>.zip`。
+4. 把 zip 发给我；里面包含日志、系统信息和最近的 MiVoice 崩溃/挂起报告。
+
+也可以直接点“打开日志文件夹”查看 `MiVoice.log`。
 
 ## 故障排查
 

@@ -92,9 +92,11 @@ final class RemoteButtons {
     var isActionsEnabled: Bool { actionsEnabled }
 
     func start(seize: Bool = true, allowActions: Bool = false) {
+        Log.info("HID.start request seize=\(seize) allowActions=\(allowActions)")
         guard manager == nil else { return }
         guard Permissions.inputMonitoring else {
             mode = .failed("未授予输入监控，自定义按键不可用")
+            Log.error("HID.start result=no_input_monitoring")
             return
         }
 
@@ -135,6 +137,7 @@ final class RemoteButtons {
                 CFRunLoopMode.commonModes.rawValue
             )
             mode = .failed("无法打开遥控器按键通道（错误 \(result)）")
+            Log.error("HID.start result=failed code=\(result)")
             return
         }
 
@@ -146,6 +149,7 @@ final class RemoteButtons {
     }
 
     func stop() {
+        Log.info("HID.stop seized=\(seized) actions=\(actionsEnabled) devices=\(deviceCount)")
         if let manager {
             IOHIDManagerUnscheduleFromRunLoop(
                 manager,
@@ -167,11 +171,13 @@ final class RemoteButtons {
 
     fileprivate func deviceAdded() {
         deviceCount += 1
+        Log.info("HID.deviceAdded count=\(deviceCount)")
         updateReadyMode()
     }
 
     fileprivate func deviceRemoved() {
         deviceCount = max(0, deviceCount - 1)
+        Log.info("HID.deviceRemoved count=\(deviceCount)")
         activeUsages.removeAll()
         updateReadyMode()
     }

@@ -66,6 +66,11 @@ final class AppModel: NSObject, ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        Log.step("model.start")
+        Log.info(
+            "settings voiceMode=\(settings.voiceMode.rawValue) " +
+                "virtualDevice=\(settings.virtualDeviceUID) lockInput=\(settings.lockSystemInput)"
+        )
 
         link.delegate = self
         buttons.delegate = self
@@ -96,6 +101,7 @@ final class AppModel: NSObject, ObservableObject {
         refreshAudioDevices()
         configureVirtualMic()
         applyVoiceModeConfiguration()
+        Log.step("model.start.end")
 
         NotificationCenter.default.addObserver(
             self,
@@ -158,6 +164,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stop() {
+        Log.step("model.stop")
         voiceKeyMapper.restore()
         inputLock.unlock()
         virtualMic.stop()
@@ -165,9 +172,11 @@ final class AppModel: NSObject, ObservableObject {
         buttons.stop()
         speech.cancel()
         hud.hide()
+        Log.step("model.stop.end")
     }
 
     @objc private func applicationDidBecomeActive() {
+        Log.info("app.didBecomeActive suspended=\(isSuspended)")
         guard !isSuspended else { return }
         refreshPermissions()
         refreshDiagnostics()
@@ -256,15 +265,34 @@ final class AppModel: NSObject, ObservableObject {
     private func suspendForSleep() {
         guard !isSuspended else { return }
         isSuspended = true
+        Log.step(
+            "suspend.begin sessionLocked=\(sessionLocked) screensAsleep=\(screensAsleep) " +
+                "systemAsleep=\(systemAsleep) mode=\(settings.voiceMode.rawValue)"
+        )
         voiceSessionActive = false
         isRecording = false
         activeVoiceMode = .appleSpeech
+
+        Log.step("suspend.hud.hide")
         hud.hide()
+
+        Log.step("suspend.speech.cancel")
         speech.cancel()
+
+        Log.step("suspend.virtualMic.stop")
         virtualMic.stop()
+
+        Log.step("suspend.link.stop")
         link.stop()
+
+        Log.step("suspend.buttons.stop")
         buttons.stop()
-        voiceKeyMapper.restore()
+
+        Log.step("suspend.fn.restore")
+        let restored = voiceKeyMapper.restore()
+        Log.info("suspend.fn.restore result=\(restored) error=\(voiceKeyMapper.error ?? "none")")
+
+        Log.step("suspend.input")
         // Keep the loopback as the default input in IME mode: an input method
         // can cache its device, and restoring it here would make the IME record
         // from the built-in mic after unlock. Quitting or switching to Apple
@@ -272,11 +300,16 @@ final class AppModel: NSObject, ObservableObject {
         if settings.voiceMode == .appleSpeech {
             inputLock.unlock()
         }
+        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+        Log.info("suspend.input mode=\(settings.voiceMode.rawValue) default=\(defaultInputName ?? "nil")")
+
+        Log.step("suspend.macMic.stop")
         macMicMonitor.stop()
         macMicLevel = 0
         macMicStatus = "已暂停（屏幕锁定/休眠）"
-        defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+        Log.step("suspend.end")
         onStatusChange?()
+        Log.flush()
     }
 
     /// Restart only after the session is active and the display is awake. The
@@ -285,17 +318,42 @@ final class AppModel: NSObject, ObservableObject {
     private func resumeAfterSleep() {
         guard isSuspended else { return }
         isSuspended = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        Log.step("resume.scheduled delay_ms=1500")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self, !self.isSuspended else { return }
+            let begin = ProcessInfo.processInfo.systemUptime
+            Log.step("resume.begin")
             self.refreshPermissions()
+            Log.info(
+                "resume.permissions accessibility=\(self.accessibilityGranted) " +
+                    "inputMonitoring=\(self.inputMonitoringGranted)"
+            )
+
+            Log.step("resume.refreshAudio")
             self.refreshAudioDevices()
+            Log.info(
+                "resume.audioDevices loopback=\(self.loopbackDevices.count) " +
+                    "default=\(self.defaultInputName ?? "nil")"
+            )
+
+            Log.step("resume.configureVirtualMic")
             self.configureVirtualMic()
+
+            Log.step("resume.link.start")
             self.link.start()
+
+            Log.step("resume.applyVoiceMode")
             self.applyVoiceModeConfiguration()
+
             if self.wantMacMicMonitor {
+                Log.step("resume.macMic.start")
                 self.startMacMicMonitor()
             }
             self.onStatusChange?()
+            let elapsed = Int((ProcessInfo.processInfo.systemUptime - begin) * 1_000)
+            Log.step("resume.end elapsed_ms=\(elapsed) virtualMic=\(self.virtualMicStatus) " +
+                "hid=\(self.hidMode.text) link=\(self.linkState.text) mic=\(self.macMicStatus)")
+            Log.flush()
         }
     }
 
@@ -335,6 +393,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func setVoiceMode(_ mode: VoiceMode) {
+        Log.info("settings.voiceMode=\(mode.rawValue)")
         var copy = settings
         copy.voiceMode = mode
         settings = copy
@@ -378,9 +437,11 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func configureVirtualMic() {
+        Log.step("virtualMic.configure")
         guard settings.voiceMode != .appleSpeech else {
             virtualMic.stop()
             virtualMicStatus = "Apple 离线模式（未使用虚拟麦克风）"
+            Log.info("virtualMic.configure result=apple_mode")
             return
         }
         let uid = settings.virtualDeviceUID.isEmpty
@@ -389,16 +450,21 @@ final class AppModel: NSObject, ObservableObject {
         guard !uid.isEmpty else {
             virtualMic.stop()
             virtualMicStatus = "未找到虚拟麦克风：请安装 BlackHole 2ch"
+            Log.error("virtualMic.configure result=no_device")
             return
         }
         if virtualMic.isReady, virtualMic.deviceUID == uid {
             virtualMicStatus = "已连接 \(virtualMicName(uid))"
+            Log.info("virtualMic.configure result=already_ready uid=\(uid)")
             return
         }
-        if virtualMic.configure(uid: uid) {
+        let ok = virtualMic.configure(uid: uid)
+        if ok {
             virtualMicStatus = "已连接 \(virtualMicName(uid))"
+            Log.info("virtualMic.configure result=ready uid=\(uid)")
         } else {
             virtualMicStatus = virtualMic.error ?? "虚拟麦克风不可用"
+            Log.error("virtualMic.configure result=failed uid=\(uid) error=\(virtualMicStatus)")
         }
         onStatusChange?()
     }
@@ -433,6 +499,10 @@ final class AppModel: NSObject, ObservableObject {
         defer { applyingVoiceConfig = false }
 
         let ime = resolvedVoiceMode == .wechatIME
+        Log.info(
+            "voiceMode.apply begin setting=\(settings.voiceMode.rawValue) " +
+                "resolved=\(resolvedVoiceMode.rawValue) virtualMic=\(virtualMic.isReady)"
+        )
         guard ime else {
             voiceKeyMapper.restore()
             fnMappingStatus = "未启用（Apple 模式）"
@@ -442,6 +512,7 @@ final class AppModel: NSObject, ObservableObject {
                 buttons.stop()
                 buttons.start(seize: true, allowActions: false)
             }
+            Log.info("voiceMode.apply result=apple_mode")
             onStatusChange?()
             return
         }
@@ -451,6 +522,7 @@ final class AppModel: NSObject, ObservableObject {
             configureVirtualMic()
         }
         guard virtualMic.isReady else {
+            Log.error("voiceMode.apply result=virtual_mic_not_ready")
             fnMappingStatus = "虚拟麦克风未就绪"
             if !buttons.isSeized {
                 buttons.stop()
@@ -480,6 +552,7 @@ final class AppModel: NSObject, ObservableObject {
         if !voiceKeyMapper.isFnMappingApplied() {
             if !voiceKeyMapper.applyFnMapping() {
                 fnMappingStatus = voiceKeyMapper.error ?? "Fn 映射失败"
+                Log.error("voiceMode.apply mapping_failed error=\(fnMappingStatus)")
                 if voiceKeyMapper.hasTargets {
                     // Mapping failed while the remote is present: fall back to
                     // seize so keys do not double-trigger, but IME won't work.
@@ -498,6 +571,10 @@ final class AppModel: NSObject, ObservableObject {
             inputLock.unlock()
         }
         defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
+        Log.info(
+            "voiceMode.apply end mapping=\(fnMappingStatus) hid=\(buttons.mode.text) " +
+                "input=\(defaultInputName ?? "nil") lock=\(settings.lockSystemInput)"
+        )
         onStatusChange?()
     }
 
@@ -507,6 +584,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func startMacMicMonitor() {
+        Log.step("macMic.start")
         wantMacMicMonitor = true
         guard !isSuspended else {
             macMicStatus = "已暂停（屏幕锁定/休眠）"
@@ -520,10 +598,13 @@ final class AppModel: NSObject, ObservableObject {
         macMicMonitor.onError = { [weak self] message in self?.macMicStatus = message }
         switch macMicMonitor.authorizationStatus {
         case .authorized:
-            if macMicMonitor.start() {
+            let ok = macMicMonitor.start()
+            if ok {
                 macMicStatus = "监听中：\(macMicMonitor.deviceName)"
+                Log.info("macMic.start result=ready device=\(macMicMonitor.deviceName)")
             } else {
                 macMicStatus = macMicMonitor.error ?? "内建麦克风不可用"
+                Log.error("macMic.start result=failed error=\(macMicStatus)")
             }
         case .notDetermined:
             macMicStatus = "等待麦克风授权…"
@@ -540,6 +621,7 @@ final class AppModel: NSObject, ObservableObject {
         default:
             macMicStatus = "未授权麦克风（系统设置 → 隐私与安全性 → 麦克风）"
             macMicLevel = 0
+            Log.error("macMic.start result=denied")
         }
     }
 
@@ -565,10 +647,12 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stopMacMicMonitor() {
+        Log.step("macMic.stop")
         wantMacMicMonitor = false
         macMicMonitor.stop()
         macMicLevel = 0
         macMicStatus = "已停止"
+        Log.info("macMic.stop result=stopped")
     }
 
     func testVirtualMic() {
@@ -670,6 +754,7 @@ final class AppModel: NSObject, ObservableObject {
 
     private func beginVoice() {
         guard !voiceSessionActive else { return }
+        Log.info("voice.begin resolved=\(resolvedVoiceMode.rawValue)")
         guard case .ready = linkState else {
             showHUD("遥控器未连接")
             return
@@ -740,6 +825,7 @@ final class AppModel: NSObject, ObservableObject {
 
     private func endVoice() {
         guard voiceSessionActive else { return }
+        Log.info("voice.end active=\(activeVoiceMode.rawValue)")
         voiceSessionActive = false
         isRecording = false
         link.sendMicrophoneClose()
@@ -829,6 +915,8 @@ final class AppModel: NSObject, ObservableObject {
             "系统输入：\(defaultInputName ?? "未知")",
             "Fn 映射：\(fnMappingStatus)",
             "最近语音峰值：\(String(format: "%.4f", sessionPeak))",
+            "挂起：\(isSuspended) lock=\(sessionLocked) screens=\(screensAsleep) system=\(systemAsleep)",
+            "日志：\(Log.fileURL.path)（当前步骤：\(Log.currentStep)）",
             "Apple 识别：\(speechDiagnostics)",
             "辅助功能：\(accessibilityGranted ? "已授权" : "未授权")",
             "输入监控：\(inputMonitoringGranted ? "已授权" : "未授权")",
@@ -839,15 +927,40 @@ final class AppModel: NSObject, ObservableObject {
         KeyInjector.copyToClipboard(diagnosticsText())
         showHUD("诊断信息已复制")
     }
+
+    func openLogFolder() {
+        NSWorkspace.shared.open(Log.directoryURL)
+    }
+
+    func exportDiagnostics() {
+        Log.step("diagnostics.export")
+        let info = diagnosticsText()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Log.exportBundle(systemInfo: info)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let url = result {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                    self.showHUD("诊断日志已导出")
+                    Log.info("diagnostics.export result=ok path=\(url.path)")
+                } else {
+                    self.showHUD("导出失败，请打开日志文件夹")
+                    Log.error("diagnostics.export result=failed")
+                }
+            }
+        }
+    }
 }
 
 extension AppModel: RemoteLinkDelegate {
     func remoteLink(_ link: RemoteLink, didChange state: RemoteLink.State) {
         linkState = state
+        Log.info("link.state \(state.text)")
         onStatusChange?()
     }
 
     func remoteLinkDidStartAudio(_ link: RemoteLink) {
+        Log.info("link.audioStarted")
         beginVoice()
     }
 
@@ -861,10 +974,12 @@ extension AppModel: RemoteLinkDelegate {
     }
 
     func remoteLinkDidStopAudio(_ link: RemoteLink) {
+        Log.info("link.audioStopped")
         endVoice()
     }
 
     func remoteLink(_ link: RemoteLink, didFail message: String) {
+        Log.error("link.failed \(message)")
         if activeVoiceMode == .wechatIME {
             activeVoiceMode = .appleSpeech
             virtualMic.cancelDrain()
@@ -879,6 +994,7 @@ extension AppModel: RemoteLinkDelegate {
 extension AppModel: RemoteButtonsDelegate {
     func remoteButtons(_ buttons: RemoteButtons, didTrigger button: RemoteButton, trigger: ButtonTrigger) {
         let binding = settings.binding(for: button, trigger: trigger)
+        Log.info("button.trigger \(button.rawValue) \(trigger.rawValue) kind=\(binding.kind.rawValue)")
         guard binding.kind != .none else { return }
         if !accessibilityGranted &&
             (binding.kind == .preset || binding.kind == .shortcut || binding.kind == .text) {
@@ -892,10 +1008,12 @@ extension AppModel: RemoteButtonsDelegate {
     }
 
     func remoteButtonsDidPressVoice(_ buttons: RemoteButtons) {
+        Log.info("voice.press")
         beginVoice()
     }
 
     func remoteButtonsDidReleaseVoice(_ buttons: RemoteButtons) {
+        Log.info("voice.release")
         endVoice()
     }
 

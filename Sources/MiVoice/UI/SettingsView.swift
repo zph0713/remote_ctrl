@@ -313,6 +313,8 @@ struct SettingsView: View {
             ))
             HStack {
                 Button("复制诊断信息") { model.copyDiagnostics() }
+                Button("导出诊断日志…") { model.exportDiagnostics() }
+                Button("打开日志文件夹") { model.openLogFolder() }
                 Spacer()
             }
         }

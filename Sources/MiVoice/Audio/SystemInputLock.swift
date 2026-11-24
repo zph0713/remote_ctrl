@@ -12,7 +12,10 @@ final class SystemInputLock {
 
     @discardableResult
     func lock(to uid: String) -> Bool {
-        guard !uid.isEmpty else { return false }
+        guard !uid.isEmpty else {
+            Log.warn("inputLock.lock empty_uid")
+            return false
+        }
         if targetUID == uid, CoreAudioDeviceCatalog.defaultInputDeviceUID() == uid {
             return true
         }
@@ -26,10 +29,12 @@ final class SystemInputLock {
         }
         targetUID = uid
         lastError = nil
+        Log.info("inputLock.lock target=\(uid) previous=\(previousUID ?? "nil")")
         return true
     }
 
     func unlock() {
+        Log.info("inputLock.unlock target=\(targetUID ?? "nil") previous=\(previousUID ?? "nil")")
         defer {
             targetUID = nil
             previousUID = nil

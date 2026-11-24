@@ -103,11 +103,13 @@ final class VoiceKeyMapper {
             }
         }
         snapshots.removeAll()
+        Log.info("fnMapping.reset result=\(!failed)")
         return !failed
     }
 
     private func apply(destinations: [UInt64: UInt64]) -> Bool {
         let services = targets()
+        Log.info("fnMapping.apply begin services=\(services.count) sources=\(destinations.count)")
         guard !services.isEmpty else {
             error = Permissions.inputMonitoring
                 ? "未找到遥控器按键服务，请确认遥控器已连接"
@@ -149,6 +151,7 @@ final class VoiceKeyMapper {
             }
         }
         error = nil
+        Log.info("fnMapping.apply result=ok services=\(services.count)")
         return true
     }
 
@@ -179,8 +182,10 @@ final class VoiceKeyMapper {
         }
         if failed {
             error = "无法恢复原来的按键映射，请断开并重新连接遥控器"
+            Log.error("fnMapping.restore result=failed")
             client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
         }
+        Log.info("fnMapping.restore result=\(!failed)")
         return !failed
     }
 

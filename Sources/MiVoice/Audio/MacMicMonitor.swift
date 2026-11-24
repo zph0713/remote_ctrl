@@ -27,17 +27,21 @@ final class MacMicMonitor {
 
     @discardableResult
     func start() -> Bool {
+        Log.info("macMic.start begin")
         stop()
         generation += 1
         let currentGeneration = generation
         guard authorizationStatus == .authorized else {
             error = "未授权麦克风"
+            Log.error("macMic.start unauthorized")
             return false
         }
         guard let device = CoreAudioDeviceCatalog.builtInInputDevice() else {
             error = "未找到内建麦克风"
+            Log.error("macMic.start no_builtin_device")
             return false
         }
+        Log.info("macMic.start device id=\(device.id) name=\(device.name)")
         let engine = AVAudioEngine()
         guard let unit = engine.inputNode.audioUnit else {
             error = "无法打开内建麦克风"
@@ -54,6 +58,7 @@ final class MacMicMonitor {
         )
         guard result == noErr else {
             error = "无法选择内建麦克风（\(result)）"
+            Log.error("macMic.start select_failed code=\(result)")
             return false
         }
         // The tap format is the format the input node *produces*; using the
@@ -61,8 +66,10 @@ final class MacMicMonitor {
         let format = engine.inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             error = "内建麦克风格式不可用"
+            Log.error("macMic.start bad_format")
             return false
         }
+        Log.info("macMic.start format rate=\(Int(format.sampleRate)) ch=\(format.channelCount)")
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self, let channels = buffer.floatChannelData else { return }
             let frameCount = Int(buffer.frameLength)
@@ -80,6 +87,9 @@ final class MacMicMonitor {
                 sampleCount += frameCount
             }
             guard sampleCount > 0 else { return }
+            if !self.receivedBuffer {
+                Log.info("macMic.firstBuffer samples=\(sampleCount)")
+            }
             self.receivedBuffer = true
             let rms = Float(sqrt(sum / Double(sampleCount)))
             DispatchQueue.main.async {
@@ -115,13 +125,16 @@ final class MacMicMonitor {
             deviceName = device.name
             error = nil
             isRunning = true
+            Log.info("macMic.start ready device=\(device.name)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.generation == currentGeneration,
                       self.isRunning, !self.receivedBuffer else { return }
+                Log.error("macMic.start no_buffers_after_1500ms")
                 self.onError?("没有收到内建麦克风数据")
             }
             return true
         } catch {
+            Log.error("macMic.start failed error=\(error.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
             engine.stop()
@@ -131,6 +144,7 @@ final class MacMicMonitor {
     }
 
     func stop() {
+        Log.info("macMic.stop running=\(isRunning)")
         generation += 1
         if tapInstalled {
             engine?.inputNode.removeTap(onBus: 0)
