@@ -295,6 +295,9 @@ final class AppModel: NSObject, ObservableObject {
         isResuming = false
         isDormant = true
         applyLimiter.reset()
+        // Decide before stopping the virtual mic: in automatic mode
+        // resolvedVoiceMode falls back to Apple once the mic is stopped.
+        let wasIME = resolvedVoiceMode == .wechatIME
         Log.step(
             "suspend.begin sessionLocked=\(sessionLocked) screensAsleep=\(screensAsleep) " +
                 "systemAsleep=\(systemAsleep) mode=\(settings.voiceMode.rawValue)"
@@ -323,12 +326,18 @@ final class AppModel: NSObject, ObservableObject {
         Log.info("suspend.fn.restore result=\(restored) error=\(voiceKeyMapper.error ?? "none")")
 
         Log.step("suspend.input")
-        // Fully restore the system input while dormant. Leaving a loopback
-        // device selected during sleep is both confusing and unnecessary now
-        // that nothing resumes until the user asks for it.
-        inputLock.unlock()
+        // In IME mode keep the loopback selected: WeChat Input caches its
+        // input device, and switching back to the built-in mic here makes it
+        // record from the wrong device after resume. Apple mode has no such
+        // cache and gets the original input restored.
+        if !wasIME {
+            inputLock.unlock()
+        }
         defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
-        Log.info("suspend.input mode=\(settings.voiceMode.rawValue) default=\(defaultInputName ?? "nil")")
+        Log.info(
+            "suspend.input mode=\(settings.voiceMode.rawValue) wasIME=\(wasIME) " +
+                "default=\(defaultInputName ?? "nil")"
+        )
 
         Log.step("suspend.macMic.stop")
         macMicMonitor.stop()
