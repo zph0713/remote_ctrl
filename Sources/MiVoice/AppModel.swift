@@ -862,15 +862,6 @@ final class AppModel: NSObject, ObservableObject {
         saveSettings()
     }
 
-    func restartApplication() {
-        let path = Bundle.main.bundlePath.replacingOccurrences(of: "'", with: "'\\''")
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 0.8; /usr/bin/open -n '\(path)'"]
-        try? task.run()
-        NSApp.terminate(nil)
-    }
-
     private func saveSettings() {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: Self.settingsKey)
