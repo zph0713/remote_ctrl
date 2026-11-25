@@ -47,6 +47,7 @@ final class AppModel: NSObject, ObservableObject {
     private var sessionPeak: Float = 0
     private var warnedAccessibility = false
     private var started = false
+    private var isRestarting = false
     private var applyingVoiceConfig = false
     private var isSuspended = false
     private var isResuming = false
@@ -173,6 +174,10 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stop() {
+        if isRestarting {
+            Log.step("model.stop skipped_for_restart")
+            return
+        }
         Log.step("model.stop")
         voiceKeyMapper.restore()
         inputLock.unlock()
@@ -186,7 +191,7 @@ final class AppModel: NSObject, ObservableObject {
 
     @objc private func applicationDidBecomeActive() {
         Log.info("app.didBecomeActive suspended=\(isSuspended) dormant=\(isDormant)")
-        guard !isSuspended, !isDormant, !isResuming else { return }
+        guard !isSuspended, !isDormant, !isResuming, !isRestarting else { return }
         refreshPermissions()
         refreshDiagnostics()
         refreshAudioDevices()
@@ -348,10 +353,101 @@ final class AppModel: NSObject, ObservableObject {
         Log.flush()
     }
 
-    /// Explicit resume from the dormant state. Never called from a wake
-    /// notification: the user chooses it from the menu once the Mac is awake.
-    /// If MiVoice is already active this just asks the link to reconnect.
+    /// Explicit wake-up from the dormant state. A fresh process is the only
+    /// reliable way to recover from a half-initialized BLE/HID/CoreAudio stack
+    /// after sleep, so restart the app; fall back to an in-place resume only if
+    /// the helper process cannot be spawned.
     func resumeFromDormant() {
+        guard isDormant else {
+            Log.info("resume.manual skipped not_dormant")
+            link.reconnectNow()
+            return
+        }
+        Log.info("resume.manual mode=restart")
+        if restartApplication() {
+            return
+        }
+        Log.error("app.restart result=spawn_failed fallback=in_place")
+        resumeInPlace()
+    }
+
+    /// Restart MiVoice by launching a detached helper that waits for this
+    /// process to exit and then opens a new instance. Returns false only when
+    /// the helper cannot be started; the caller may fall back to `resumeInPlace`.
+    @discardableResult
+    func restartApplication() -> Bool {
+        guard !isRestarting else { return true }
+        isRestarting = true
+        Log.step("app.restart begin")
+        // In the dormant path these are already stopped; calling them again is
+        // cheap and also makes an explicit restart while active safe.
+        virtualMic.stop()
+        link.stop()
+        buttons.stop()
+        speech.cancel()
+        hud.hide()
+        Log.flush()
+
+        let appPath = Bundle.main.bundleURL.path
+        guard FileManager.default.fileExists(atPath: appPath) else {
+            Log.error("app.restart missing_bundle path=\(appPath)")
+            isRestarting = false
+            showHUD("找不到 MiVoice.app，无法自动重启")
+            return false
+        }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let logDirectory = Log.directoryURL.path
+        let relaunchLog = Log.directoryURL.appendingPathComponent("relaunch.log").path
+        let script = """
+        #!/bin/sh
+        trap '' HUP
+        mkdir -p \(shellQuote(logDirectory))
+        exec >>\(shellQuote(relaunchLog)) 2>&1
+        echo "relaunch $(date '+%Y-%m-%d %H:%M:%S') old_pid=\(pid) app="\(shellQuote(appPath))
+        n=0
+        while kill -0 \(pid) 2>/dev/null; do
+          n=$((n+1))
+          if [ "$n" -ge 200 ]; then
+            if /bin/ps -p \(pid) -o comm= 2>/dev/null | /usr/bin/grep -q MiVoice; then
+              echo "old process did not exit; sending SIGKILL"
+              kill -9 \(pid) 2>/dev/null
+            fi
+            sleep 1
+            break
+          fi
+          sleep 0.1
+        done
+        /usr/bin/open -n \(shellQuote(appPath))
+        echo "open_exit=$?"
+        """
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            Log.error("app.restart spawn_failed error=\(error.localizedDescription)")
+            isRestarting = false
+            showHUD("自动重启失败：\(error.localizedDescription)")
+            return false
+        }
+        Log.info("app.restart helper_started pid=\(pid)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NSApp.terminate(nil)
+        }
+        return true
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// In-place fallback used only when the helper process cannot be spawned.
+    private func resumeInPlace() {
         guard !isResuming else {
             Log.info("resume.manual skipped resuming")
             return
@@ -494,7 +590,7 @@ final class AppModel: NSObject, ObservableObject {
 
     func configureVirtualMic() {
         Log.step("virtualMic.configure")
-        guard !isDormant, !isSuspended else {
+        guard !isDormant, !isSuspended, !isRestarting else {
             virtualMicStatus = "已休眠（恢复连接后启用）"
             Log.info("virtualMic.configure skipped dormant=\(isDormant) suspended=\(isSuspended)")
             return
@@ -540,7 +636,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     var voiceStatusText: String {
-        if isDormant { return "已休眠（点菜单栏「恢复连接」）" }
+        if isDormant { return "已深度休眠（点按恢复会重启 MiVoice）" }
         if resolvedVoiceMode == .wechatIME {
             return virtualMic.isReady ? "微信输入法 · \(fnMappingStatus)" : "微信输入法 · 虚拟麦克风未就绪"
         }
@@ -556,7 +652,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func applyVoiceModeConfiguration() {
-        guard !isDormant, !isSuspended else {
+        guard !isDormant, !isSuspended, !isRestarting else {
             Log.info("voiceMode.apply skipped dormant=\(isDormant) suspended=\(isSuspended)")
             return
         }
@@ -723,6 +819,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func stopMacMicMonitor() {
+        if isRestarting { return }
         Log.step("macMic.stop")
         wantMacMicMonitor = false
         macMicMonitor.stop()
@@ -834,7 +931,7 @@ final class AppModel: NSObject, ObservableObject {
 
     private func beginVoice() {
         guard !voiceSessionActive else { return }
-        guard !isDormant, !isSuspended, !isResuming else {
+        guard !isDormant, !isSuspended, !isResuming, !isRestarting else {
             Log.info("voice.begin skipped dormant=\(isDormant) suspended=\(isSuspended)")
             return
         }

@@ -72,12 +72,12 @@ struct SettingsView: View {
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("已深度休眠").font(.headline)
-                Text("合盖 / 锁屏后蓝牙、音频和按键服务已全部停止。恢复连接后再使用遥控器。")
+                Text("合盖 / 锁屏后蓝牙、音频和按键服务已全部停止。点按会重启 MiVoice，用全新进程恢复连接。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("恢复连接") { model.resumeFromDormant() }
+            Button("重启并恢复") { model.resumeFromDormant() }
                 .buttonStyle(.borderedProminent)
         }
         .padding(14)
@@ -331,7 +331,7 @@ struct SettingsView: View {
                 get: { model.settings.restoreClipboard },
                 set: { model.setRestoreClipboard($0) }
             ))
-            Text("合盖或锁屏后自动进入深度休眠：停止蓝牙、音频和按键服务，唤醒后从菜单栏点「恢复连接」再使用遥控器。")
+            Text("合盖或锁屏后自动进入深度休眠：停止蓝牙、音频和按键服务；唤醒后点「重启并恢复」会用全新进程重新连接，避免 HID/音频半初始化。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

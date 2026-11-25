@@ -51,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if model.isDormant {
+            model.resumeFromDormant()
+            return true
+        }
         showSettings()
         return true
     }
@@ -67,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(.separator())
 
         if model.isDormant {
-            add(menu, "恢复连接", #selector(resumeFromDormant), "r")
+            add(menu, "重启并恢复连接", #selector(resumeFromDormant), "r")
         }
         add(menu, "打开设置…", #selector(showSettings), ",")
         add(menu, "重新连接遥控器", #selector(reconnectRemote), "")
