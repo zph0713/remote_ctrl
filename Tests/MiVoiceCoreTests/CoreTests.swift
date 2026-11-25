@@ -306,3 +306,28 @@ final class ButtonGestureRecognizerTests: XCTestCase {
         )
     }
 }
+
+final class BurstLimiterTests: XCTestCase {
+    func testAllowsUpToLimitThenBlocks() {
+        var limiter = BurstLimiter(window: 10, limit: 6)
+        for second in 0..<6 {
+            XCTAssertFalse(limiter.shouldBlock(at: TimeInterval(second)))
+        }
+        XCTAssertTrue(limiter.shouldBlock(at: 6))
+    }
+
+    func testWindowExpiresOldAttempts() {
+        var limiter = BurstLimiter(window: 10, limit: 1)
+        XCTAssertFalse(limiter.shouldBlock(at: 0))
+        XCTAssertTrue(limiter.shouldBlock(at: 1))
+        XCTAssertFalse(limiter.shouldBlock(at: 20))
+    }
+
+    func testResetClearsBurst() {
+        var limiter = BurstLimiter(window: 10, limit: 1)
+        XCTAssertFalse(limiter.shouldBlock(at: 0))
+        XCTAssertTrue(limiter.shouldBlock(at: 1))
+        limiter.reset()
+        XCTAssertFalse(limiter.shouldBlock(at: 2))
+    }
+}

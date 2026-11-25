@@ -12,6 +12,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                if model.isDormant { dormantCard }
                 statusCard
                 voiceModeCard
                 speechCard
@@ -62,6 +63,25 @@ struct SettingsView: View {
                 return nil
             }
         }
+    }
+
+    private var dormantCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "pause.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已深度休眠").font(.headline)
+                Text("合盖 / 锁屏后蓝牙、音频和按键服务已全部停止。恢复连接后再使用遥控器。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("恢复连接") { model.resumeFromDormant() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
     }
 
     private var header: some View {
@@ -311,6 +331,10 @@ struct SettingsView: View {
                 get: { model.settings.restoreClipboard },
                 set: { model.setRestoreClipboard($0) }
             ))
+            Text("合盖或锁屏后自动进入深度休眠：停止蓝牙、音频和按键服务，唤醒后从菜单栏点「恢复连接」再使用遥控器。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("复制诊断信息") { model.copyDiagnostics() }
                 Button("导出诊断日志…") { model.exportDiagnostics() }

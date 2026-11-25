@@ -58,11 +58,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        if model.isDormant {
+            addDisabled(menu, "已深度休眠：蓝牙、音频、按键均已停止")
+        }
         addDisabled(menu, model.linkState.text)
         addDisabled(menu, "按键：\(model.hidMode.text)")
         addDisabled(menu, "语音：\(model.voiceStatusText)")
         menu.addItem(.separator())
 
+        if model.isDormant {
+            add(menu, "恢复连接", #selector(resumeFromDormant), "r")
+        }
         add(menu, "打开设置…", #selector(showSettings), ",")
         add(menu, "重新连接遥控器", #selector(reconnectRemote), "")
         add(menu, "复制诊断信息", #selector(copyDiagnostics), "")
@@ -102,6 +108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         model.reconnectRemote()
     }
 
+    @objc private func resumeFromDormant() {
+        model.resumeFromDormant()
+    }
+
     @objc private func copyDiagnostics() {
         model.copyDiagnostics()
     }
@@ -133,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func refreshStatusIcon() {
         guard let statusItem else { return }
         let image: NSImage?
-        if model.isRecording {
+        if model.isDormant {
+            image = NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "MiVoice 已休眠")
+        } else if model.isRecording {
             image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "MiVoice 正在听")
         } else {
             switch model.linkState {

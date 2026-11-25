@@ -26,6 +26,10 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var virtualMicLevel: Float = 0
     @Published private(set) var macMicLevel: Float = 0
     @Published private(set) var macMicStatus = "未启用"
+    /// True after sleep/lock: every service is stopped and nothing is probed
+    /// until the user chooses "恢复连接". This prevents the wake-time storm
+    /// where BLE/HID/audio repeatedly fail and rebuild themselves.
+    @Published private(set) var isDormant = false
     @Published var recordingButton: RemoteButton?
     @Published var recordingTrigger: ButtonTrigger = .singleClick
 
@@ -45,6 +49,11 @@ final class AppModel: NSObject, ObservableObject {
     private var started = false
     private var applyingVoiceConfig = false
     private var isSuspended = false
+    private var isResuming = false
+    private var lastAutoApplyAt: TimeInterval = 0
+    private var applyLimiter = BurstLimiter(window: 10, limit: 6)
+    private var lastHUDText: String?
+    private var lastHUDAt: TimeInterval = 0
     private var sessionLocked = false
     private var screensAsleep = false
     private var systemAsleep = false
@@ -176,8 +185,8 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     @objc private func applicationDidBecomeActive() {
-        Log.info("app.didBecomeActive suspended=\(isSuspended)")
-        guard !isSuspended else { return }
+        Log.info("app.didBecomeActive suspended=\(isSuspended) dormant=\(isDormant)")
+        guard !isSuspended, !isDormant, !isResuming else { return }
         refreshPermissions()
         refreshDiagnostics()
         refreshAudioDevices()
@@ -267,8 +276,14 @@ final class AppModel: NSObject, ObservableObject {
         )
         if shouldSuspend {
             suspendForSleep()
+        } else if isDormant {
+            // Deliberately do not wake anything up. After a lid-open the BLE,
+            // HID and CoreAudio stacks can be half-initialized; rebuilding them
+            // immediately caused a failure/rebuild storm. Stay dormant until
+            // the user explicitly chooses "恢复连接".
+            Log.info("resume.skipped dormant=true")
         } else {
-            resumeAfterSleep()
+            Log.info("resume.skipped not_suspended")
         }
     }
 
@@ -277,6 +292,9 @@ final class AppModel: NSObject, ObservableObject {
     private func suspendForSleep() {
         guard !isSuspended else { return }
         isSuspended = true
+        isResuming = false
+        isDormant = true
+        applyLimiter.reset()
         Log.step(
             "suspend.begin sessionLocked=\(sessionLocked) screensAsleep=\(screensAsleep) " +
                 "systemAsleep=\(systemAsleep) mode=\(settings.voiceMode.rawValue)"
@@ -305,13 +323,10 @@ final class AppModel: NSObject, ObservableObject {
         Log.info("suspend.fn.restore result=\(restored) error=\(voiceKeyMapper.error ?? "none")")
 
         Log.step("suspend.input")
-        // Keep the loopback as the default input in IME mode: an input method
-        // can cache its device, and restoring it here would make the IME record
-        // from the built-in mic after unlock. Quitting or switching to Apple
-        // mode still restores the previous input.
-        if settings.voiceMode == .appleSpeech {
-            inputLock.unlock()
-        }
+        // Fully restore the system input while dormant. Leaving a loopback
+        // device selected during sleep is both confusing and unnecessary now
+        // that nothing resumes until the user asks for it.
+        inputLock.unlock()
         defaultInputName = CoreAudioDeviceCatalog.defaultInputDeviceName()
         Log.info("suspend.input mode=\(settings.voiceMode.rawValue) default=\(defaultInputName ?? "nil")")
 
@@ -319,23 +334,38 @@ final class AppModel: NSObject, ObservableObject {
         macMicMonitor.stop()
         macMicLevel = 0
         macMicStatus = "已暂停（屏幕锁定/休眠）"
-        Log.step("suspend.end")
+        Log.step("suspend.end dormant=true")
         onStatusChange?()
         Log.flush()
     }
 
-    /// Restart only after the session is active and the display is awake. The
-    /// short delay keeps unlock/login responsive instead of doing BLE, audio
-    /// and HID work in the same run loop turn as the wake notification.
-    private func resumeAfterSleep() {
-        guard isSuspended else {
-            Log.info("resume.skipped already_active")
+    /// Explicit resume from the dormant state. Never called from a wake
+    /// notification: the user chooses it from the menu once the Mac is awake.
+    /// If MiVoice is already active this just asks the link to reconnect.
+    func resumeFromDormant() {
+        guard !isResuming else {
+            Log.info("resume.manual skipped resuming")
             return
         }
+        guard isDormant else {
+            Log.info("resume.manual skipped not_dormant")
+            link.reconnectNow()
+            return
+        }
+        isDormant = false
         isSuspended = false
-        Log.step("resume.scheduled delay_ms=1500")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, !self.isSuspended else { return }
+        isResuming = true
+        applyLimiter.reset()
+        sessionLocked = false
+        screensAsleep = false
+        systemAsleep = false
+        Log.step("resume.manual delay_ms=600")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, !self.isDormant, !self.isSuspended else {
+                Log.info("resume.manual cancelled")
+                self?.isResuming = false
+                return
+            }
             let begin = ProcessInfo.processInfo.systemUptime
             Log.step("resume.begin")
             self.refreshPermissions()
@@ -368,6 +398,7 @@ final class AppModel: NSObject, ObservableObject {
             let elapsed = Int((ProcessInfo.processInfo.systemUptime - begin) * 1_000)
             Log.step("resume.end elapsed_ms=\(elapsed) virtualMic=\(self.virtualMicStatus) " +
                 "hid=\(self.hidMode.text) link=\(self.linkState.text) mic=\(self.macMicStatus)")
+            self.isResuming = false
             Log.flush()
         }
     }
@@ -432,6 +463,7 @@ final class AppModel: NSObject, ObservableObject {
         copy.lockSystemInput = value
         settings = copy
         saveSettings()
+        guard !isDormant, !isSuspended else { return }
         if value, resolvedVoiceMode == .wechatIME, virtualMic.isReady {
             _ = inputLock.lock(to: virtualMic.deviceUID)
         } else if !value {
@@ -453,6 +485,11 @@ final class AppModel: NSObject, ObservableObject {
 
     func configureVirtualMic() {
         Log.step("virtualMic.configure")
+        guard !isDormant, !isSuspended else {
+            virtualMicStatus = "已休眠（恢复连接后启用）"
+            Log.info("virtualMic.configure skipped dormant=\(isDormant) suspended=\(isSuspended)")
+            return
+        }
         guard settings.voiceMode != .appleSpeech else {
             virtualMic.stop()
             virtualMicStatus = "Apple 离线模式（未使用虚拟麦克风）"
@@ -494,6 +531,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     var voiceStatusText: String {
+        if isDormant { return "已休眠（点菜单栏「恢复连接」）" }
         if resolvedVoiceMode == .wechatIME {
             return virtualMic.isReady ? "微信输入法 · \(fnMappingStatus)" : "微信输入法 · 虚拟麦克风未就绪"
         }
@@ -509,9 +547,25 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func applyVoiceModeConfiguration() {
+        guard !isDormant, !isSuspended else {
+            Log.info("voiceMode.apply skipped dormant=\(isDormant) suspended=\(isSuspended)")
+            return
+        }
         guard !applyingVoiceConfig else { return }
         applyingVoiceConfig = true
         defer { applyingVoiceConfig = false }
+
+        // Circuit breaker: if configuration is being re-entered in a burst,
+        // stop every service instead of letting a failure/rebuild loop take
+        // the main thread down. The user can resume deliberately.
+        let now = ProcessInfo.processInfo.systemUptime
+        if applyLimiter.shouldBlock(at: now) {
+            Log.error("voiceMode.apply circuit_breaker attempts=\(applyLimiter.count)")
+            suspendForSleep()
+            showHUD("配置反复失败，MiVoice 已休眠；请从菜单恢复连接")
+            onStatusChange?()
+            return
+        }
 
         let ime = resolvedVoiceMode == .wechatIME
         Log.info(
@@ -539,10 +593,9 @@ final class AppModel: NSObject, ObservableObject {
         guard virtualMic.isReady else {
             Log.error("voiceMode.apply result=virtual_mic_not_ready")
             fnMappingStatus = "虚拟麦克风未就绪"
-            if !buttons.isSeized {
-                buttons.stop()
-                buttons.start(seize: true, allowActions: false)
-            }
+            // Do not rebuild HID here either: when the virtual mic is missing
+            // the device-added callback can re-enter this path. Leave the
+            // current manager alone and let the user fix the audio device.
             inputLock.unlock()
             onStatusChange?()
             return
@@ -568,13 +621,12 @@ final class AppModel: NSObject, ObservableObject {
             if !voiceKeyMapper.applyFnMapping() {
                 fnMappingStatus = voiceKeyMapper.error ?? "Fn 映射失败"
                 Log.error("voiceMode.apply mapping_failed error=\(fnMappingStatus)")
-                if voiceKeyMapper.hasTargets {
-                    // Mapping failed while the remote is present: fall back to
-                    // seize so keys do not double-trigger, but IME won't work.
-                    buttons.stop()
-                    buttons.start(seize: true, allowActions: false)
-                    showHUD("Fn 映射失败：\(fnMappingStatus)")
-                }
+                // Do not tear down and rebuild the HID manager here. A failed
+                // mapping after wake used to fall back to seize, which failed
+                // again and re-triggered this path in a tight loop (HUD spam
+                // and a frozen main thread). Keep the monitor-only manager and
+                // report once; the next user action can retry explicitly.
+                showHUD("Fn 映射失败：\(fnMappingStatus)")
                 onStatusChange?()
                 return
             }
@@ -601,8 +653,8 @@ final class AppModel: NSObject, ObservableObject {
     func startMacMicMonitor() {
         Log.step("macMic.start")
         wantMacMicMonitor = true
-        guard !isSuspended else {
-            macMicStatus = "已暂停（屏幕锁定/休眠）"
+        guard !isSuspended, !isDormant else {
+            macMicStatus = "已休眠（点按恢复连接后启用）"
             return
         }
         if macMicMonitor.isRunning {
@@ -758,7 +810,11 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func reconnectRemote() {
-        link.reconnectNow()
+        if isDormant {
+            resumeFromDormant()
+        } else {
+            link.reconnectNow()
+        }
     }
 
     func refreshDiagnostics() {
@@ -769,6 +825,10 @@ final class AppModel: NSObject, ObservableObject {
 
     private func beginVoice() {
         guard !voiceSessionActive else { return }
+        guard !isDormant, !isSuspended, !isResuming else {
+            Log.info("voice.begin skipped dormant=\(isDormant) suspended=\(isSuspended)")
+            return
+        }
         Log.info("voice.begin resolved=\(resolvedVoiceMode.rawValue)")
         guard case .ready = linkState else {
             showHUD("遥控器未连接")
@@ -912,6 +972,14 @@ final class AppModel: NSObject, ObservableObject {
 
     private func showHUD(_ message: String, detail: String? = nil, sticky: Bool = false) {
         guard settings.showHUD else { return }
+        if detail == nil, !sticky {
+            let now = ProcessInfo.processInfo.systemUptime
+            if message == lastHUDText, now - lastHUDAt < 5 {
+                return
+            }
+            lastHUDText = message
+            lastHUDAt = now
+        }
         hud.show(message, detail: detail, sticky: sticky)
     }
 
@@ -930,7 +998,8 @@ final class AppModel: NSObject, ObservableObject {
             "系统输入：\(defaultInputName ?? "未知")",
             "Fn 映射：\(fnMappingStatus)",
             "最近语音峰值：\(String(format: "%.4f", sessionPeak))",
-            "挂起：\(isSuspended) lock=\(sessionLocked) screens=\(screensAsleep) system=\(systemAsleep)",
+            "挂起：\(isSuspended) 深度休眠：\(isDormant) lock=\(sessionLocked) " +
+                "screens=\(screensAsleep) system=\(systemAsleep)",
             "日志：\(Log.fileURL.path)（当前步骤：\(Log.currentStep)）",
             "Apple 识别：\(speechDiagnostics)",
             "辅助功能：\(accessibilityGranted ? "已授权" : "未授权")",
@@ -1038,10 +1107,19 @@ extension AppModel: RemoteButtonsDelegate {
             if !seized && !actions && devices > 0 {
                 showHUD("未能独占遥控器：自定义按键已停用")
             }
-            if devices > 0, !seized, resolvedVoiceMode == .wechatIME,
+            if devices > 0, !seized, !isDormant, !isSuspended,
+               resolvedVoiceMode == .wechatIME,
                !voiceKeyMapper.isFnMappingApplied() {
-                DispatchQueue.main.async { [weak self] in
-                    self?.applyVoiceModeConfiguration()
+                // Device-added notifications can arrive in a burst after wake.
+                // Retry at most once every few seconds; applyVoiceModeConfiguration
+                // no longer rebuilds the manager on mapping failure, so this
+                // cannot turn into a stop/start loop.
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - lastAutoApplyAt > 8 {
+                    lastAutoApplyAt = now
+                    DispatchQueue.main.async { [weak self] in
+                        self?.applyVoiceModeConfiguration()
+                    }
                 }
             }
         }

@@ -92,6 +92,7 @@ final class RemoteLink: NSObject {
     func start() {
         guard !shouldRun else { return }
         shouldRun = true
+        failureCount = 0
         central = CBCentralManager(
             delegate: self,
             queue: .main,
